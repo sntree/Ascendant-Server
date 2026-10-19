@@ -48,6 +48,7 @@ function exile_fail(e)
 	local get_client=eq.get_entity_list():GetRandomClient(e.self:GetX(),e.self:GetY(),e.self:GetZ(),3136);
 	--get client within 56 radius
 	if get_client.valid then
-		e.self:CastSpell(2151,get_client:GetID()); --Contagious Insanity
+		-- Ascendant: unresistable charm removed (no banish / death touch / unresistable charm policy)
+		-- e.self:CastSpell(2151,get_client:GetID()); --Contagious Insanity
 	end
 end

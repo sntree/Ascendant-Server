@@ -1,21 +1,20 @@
-/*	EQEMu: Everquest Server Emulator
-	Copyright (C) 2001-2016 EQEMu Development Team (http://eqemulator.net)
+/*	EQEmu: EQEmulator
+
+	Copyright (C) 2001-2026 EQEmu Development Team
 
 	This program is free software; you can redistribute it and/or modify
 	it under the terms of the GNU General Public License as published by
-	the Free Software Foundation; version 2 of the License.
+	the Free Software Foundation; either version 3 of the License, or
+	(at your option) any later version.
 
 	This program is distributed in the hope that it will be useful,
-	but WITHOUT ANY WARRANTY except by those people which sell it, which
-	are required to give you total support for your newly bought product;
-	without even the implied warranty of MERCHANTABILITY or FITNESS FOR
-	A PARTICULAR PURPOSE. See the GNU General Public License for more details.
+	but WITHOUT ANY WARRANTY; without even the implied warranty of
+	MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+	GNU General Public License for more details.
 
 	You should have received a copy of the GNU General Public License
-	along with this program; if not, write to the Free Software
-	Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
+	along with this program. If not, see <http://www.gnu.org/licenses/>.
 */
-
 #pragma once
 
 #include "common/emu_constants.h"
@@ -47,6 +46,13 @@ static const uint32 ADVANCED_LORE_LENGTH = 8192;
 */
 #pragma pack(push)
 #pragma pack(1)
+
+struct EqGuid
+{
+	uint32_t Id;
+	uint16_t WorldId;
+	uint16_t Reserved;
+};
 
 struct LoginInfo {
 /*000*/	char	login_info[64];
@@ -122,7 +128,7 @@ struct LDoNTrapTemplate
 {
 	uint32 id;
 	LDoNChestTypes type;
-	uint32 spell_id;
+	int32 spell_id;
 	uint16 skill;
 	uint8 locked;
 };
@@ -327,6 +333,7 @@ union
 	bool buyer;
 	bool untargetable;
 	uint32 npc_tint_id;
+	EqGuid CharacterGuid;
 };
 
 struct PlayerState_Struct {
@@ -415,7 +422,7 @@ struct NewZone_Struct {
 */
 struct MemorizeSpell_Struct {
 uint32 slot;		// Spot in the spell book/memorized slot
-uint32 spell_id;	// Spell id (200 or c8 is minor healing, etc)
+int32  spell_id;	// Spell id (200 or c8 is minor healing, etc)
 uint32 scribing;	// 1 if memorizing a spell, set to 0 if scribing to book, 2 if un-memming
 uint32 reduction;	// lower reuse
 };
@@ -464,7 +471,7 @@ struct ManaChange_Struct
 {
 /*00*/	uint32	new_mana;		// New Mana AMount
 /*04*/	uint32	stamina;
-/*08*/	uint32	spell_id;
+/*08*/	int32   spell_id;
 /*12*/	uint8	keepcasting;	// won't stop the cast. Change mana while casting?
 /*13*/	uint8	padding[3];		// client doesn't read it, garbage data seems like
 /*16*/	int32	slot;			// -1 normal, otherwise clear ETA and GCD
@@ -482,14 +489,14 @@ struct BeginCast_Struct
 {
 	// len = 8
 /*000*/	uint16	caster_id;
-/*002*/	uint16	spell_id;
+/*002*/	int16 spell_id;
 /*004*/	uint32	cast_time;		// in miliseconds
 };
 
 struct CastSpell_Struct
 {
 	uint32	slot;
-	uint32	spell_id;
+	int32   spell_id;
 	uint32	inventoryslot; // slot for clicky item, 0xFFFF = normal cast
 	uint32	target_id;
 	uint32  cs_unknown1;
@@ -537,7 +544,7 @@ struct SpellBuff_Struct
 /*001*/	uint8	level;
 /*002*/	uint8	bard_modifier;
 /*003*/	uint8	unknown003;		// MQ2 used to call this "damage shield" -- don't see client referencing it, so maybe server side DS type tracking? -- OSX client calls this "activated"
-/*004*/	uint32	spellid;
+/*004*/	int32   spellid;
 /*008*/	int32	duration;
 /*012*/	uint32	counters;	// single book keeping value (counters, rune/vie)
 /*016*/	uint32	player_id;	// caster ID, pretty sure just zone ID
@@ -567,7 +574,7 @@ struct BuffRemoveRequest_Struct
 
 struct PetBuff_Struct {
 /*000*/ uint32 petid;
-/*004*/ uint32 spellid[PET_BUFF_COUNT];
+/*004*/ int32 spellid[PET_BUFF_COUNT];
 /*124*/ int32 ticsremaining[PET_BUFF_COUNT];
 /*244*/ uint32 buffcount;
 };
@@ -623,8 +630,8 @@ struct GMTrainEnd_Struct
 struct GMSkillChange_Struct {
 /*000*/	uint16		npcid;
 /*002*/ uint8		unknown1[2];	// something like PC_ID, but not really. stays the same thru the session though
-/*002*/ uint16		skillbank;		// 0 if normal skills, 1 if languages
-/*002*/ uint8		unknown2[2];
+/*004*/ uint16		skillbank;		// 0 if normal skills, 1 if languages
+/*006*/ uint8		unknown2[2];
 /*008*/ uint16		skill_id;
 /*010*/ uint8		unknown3[2];
 };
@@ -868,7 +875,7 @@ struct BindStruct {
 
 struct SuspendedMinion_Struct
 {
-	/*000*/	uint16 SpellID;
+	/*000*/	int16 SpellID;
 	/*002*/	uint32 HP;
 	/*006*/	uint32 Mana;
 	/*010*/	SpellBuff_Struct Buffs[BUFF_COUNT];
@@ -1003,7 +1010,7 @@ struct PlayerProfile_Struct
 /*2505*/	uint8				unknown2541[47];	// ?
 /*2552*/	uint8				languages[MAX_PP_LANGUAGE];
 /*2580*/	uint8				unknown2616[4];
-/*2584*/	uint32				spell_book[EQ::spells::SPELLBOOK_SIZE];
+/*2584*/	int32				spell_book[EQ::spells::SPELLBOOK_SIZE];
 /*4504*/	uint8				unknown4540[128];	// Was [428] all 0xff
 /*4632*/	uint32				mem_spells[EQ::spells::SPELL_GEM_COUNT];
 /*4668*/	uint8				unknown4704[32];	//
@@ -1124,6 +1131,7 @@ struct PlayerProfile_Struct
 /*19559*/	uint8				unknown19595[5];	// ***Placeholder (6/29/2005)
 /*19564*/	uint32				RestTimer;
 /*19568*/	uint32				char_id;			// Found as part of bazaar revamp (5/15/2024)
+			uint8				tob_keyring_unlocks;	// server only: bit r = key ring r unlocked (sent to TOB+ as store claims)
 
 	// All player profile packets are translated and this overhead is ignored in out-bound packets
 	PlayerProfile_Struct() : m_player_profile_version(EQ::versions::MobVersion::Unknown) { }
@@ -1337,7 +1345,7 @@ struct CombatDamage_Struct
 /* 00 */	uint16	target;
 /* 02 */	uint16	source;
 /* 04 */	uint8	type; //slashing, etc. 231 (0xE7) for spells, skill
-/* 05 */	uint16	spellid;
+/* 05 */	int16   spellid;
 /* 07 */	uint32	damage;
 /* 11 */	float force;
 /* 15 */	float hit_heading;	// see above notes in Action_Struct
@@ -1370,7 +1378,7 @@ struct Death_Struct
 /*004*/	uint32	killer_id;
 /*008*/	uint32	corpseid;	// was corpseid
 /*012*/	uint32	bindzoneid;
-/*016*/	uint32	spell_id;
+/*016*/	int32   spell_id;
 /*020*/	uint32	attack_skill;
 /*024*/	uint32	damage;
 /*028*/	uint32	unknown028;
@@ -1554,6 +1562,9 @@ enum ItemPacketType {
     ItemPacketCharmUpdate    = 0x6E, // noted as incorrect
     ItemPacketRecovery       = 0x71,
     ItemPacketParcel         = 0x73,
+    ItemPacketOverflow       = 0x75, // TOB+ Item Overflow window
+    ItemPacketDragonHoard    = 0x76, // TOB+ Dragon's Hoard window
+    ItemPacketTradeskillDepot = 0x77, // TOB+ Tradeskill Depot window
     ItemPacketInvalid        = 0xFF
 };
 
@@ -2509,7 +2520,8 @@ struct GroupUpdate2_Struct {
 /*0452*/	GroupLeadershipAA_Struct leader_aas;
 /*0580*/	uint8	unknown580[196];
 /*0766*/	uint32	NPCMarkerID;	// EntityID of player delegated MarkNPC ability
-/*0780*/	uint8	unknown780[56];
+/*0780*/	uint32	group_id;		// TOB+: sent first in the roster; the client needs it non-zero
+/*0784*/	uint8	unknown784[52];
 /*0836*/
 };
 struct GroupJoin_Struct {
@@ -2976,7 +2988,7 @@ struct Resurrect_Struct	{
 /*024*/	char	your_name[64];
 /*088*/	uint32	unknown088;
 /*092*/	char	rezzer_name[64];
-/*156*/	uint32	spellid;
+/*156*/	int32   spellid;
 /*160*/	char	corpse_name[64];
 /*224*/	uint32	action;
 /* 228 */
@@ -2984,7 +2996,7 @@ struct Resurrect_Struct	{
 
 struct Translocate_Struct {
 /*000*/	uint32	ZoneID;
-/*004*/	uint32	SpellID;
+/*004*/	int32   SpellID;
 /*008*/	uint32	unknown008; //Heading ?
 /*012*/	char	Caster[64];
 /*076*/	float	y;
@@ -3001,7 +3013,7 @@ struct PendingTranslocate_Struct
 	float x;
 	float y;
 	float z;
-	uint32 spell_id;
+	int32 spell_id;
 };
 
 struct Sacrifice_Struct {
@@ -4332,6 +4344,12 @@ struct RecipeAutoCombine_Struct {
 								// f5 ff ff ff in 'you dont have all the stuff' reply
 };
 
+// TOB+ request: the reply stays RecipeAutoCombine_Struct
+struct RecipeAutoCombineDepot_Struct {
+	RecipeAutoCombine_Struct combine;
+	uint8                    use_depot; // take missing components from the Tradeskill Depot
+};
+
 // this is the "value#a" data
 enum EParticlePoint {
 	eDefault,
@@ -4411,6 +4429,197 @@ struct FindPerson_Point {
 struct FindPersonRequest_Struct {
 	uint32	npc_id;
 	FindPerson_Point client_pos;
+};
+
+// TOB+ request: also carries the row type and the destination of Find window zone connection rows
+struct FindPersonRequestTOB_Struct {
+	FindPersonRequest_Struct request;
+	uint32 request_type; // 1 = findable NPC, 6 = zone point by id, 7 = path to dest
+	uint32 id;
+	FindPerson_Point dest;
+};
+
+// TOB+ Find window "Zone Connection" rows (same layout on the wire)
+struct FindZoneConnection_Struct {
+/*00*/ uint32 row_type;     // 7 = client asks for a path to loc, 6 = client asks by id
+/*04*/ uint32 id;
+/*08*/ uint32 unknown08;
+/*12*/ uint32 zone_id;      // row text is this zone's name
+/*16*/ uint32 number;       // != 0 adds " - N" to the row text
+/*20*/ FindPerson_Point loc;
+/*32*/
+};
+static_assert(sizeof(FindZoneConnection_Struct) == 32, "FindZoneConnection_Struct is sent as is to TOB clients");
+
+struct FindZoneConnections_Struct {
+	uint32 count;
+	FindZoneConnection_Struct entries[0];
+};
+
+// TOB+ Faction window list (same layout on the wire). Raw personal values: the client adds
+// the race/class/deity modifiers itself from Resources/Faction/FactionAssociations.txt
+struct FactionListEntry_Struct {
+/*00*/ uint32 faction_id;
+/*04*/ int32  value;
+/*08*/
+};
+
+struct FactionList_Struct {
+	uint32 count;
+	FactionListEntry_Struct entries[0];
+};
+
+// TOB+ standing change (same layout on the wire). The client applies new_value - old_value
+// to its copy and, if show_message is set, prints the standing line itself
+struct FactionUpdate_Struct {
+/*00*/ uint8  show_message;
+/*01*/ int32  message_type; // 0 = did not change (14526), 1 = at the cap (469/471 by direction), 2 = adjusted by (14261)
+/*05*/ uint32 faction_id;
+/*09*/ int32  direction;    // sign only, used by message_type 1
+/*13*/ int32  old_value;
+/*17*/ int32  new_value;
+/*21*/
+};
+static_assert(sizeof(FactionUpdate_Struct) == 21, "FactionUpdate_Struct is sent as is to TOB clients");
+
+// TOB+ Item Overflow window (0x1bd5); the TOB patch converts to and from the wire layout
+enum ItemOverflowAction : uint32 {
+	ItemOverflowList        = 0, // C2S
+	ItemOverflowRetrieve    = 1, // C2S, item_index
+	ItemOverflowRetrieveAll = 2, // C2S
+	ItemOverflowRemoved     = 4, // S2C, item_index
+	ItemOverflowClear       = 7  // S2C
+};
+
+struct ItemOverflow_Struct {
+/*00*/ uint32 action;
+/*04*/ uint64 item_index; // the 8-byte id in the serialized item (the item's serial number)
+/*12*/
+};
+
+// TOB+ Dragon's Hoard; the TOB patch converts to and from the wire layouts
+enum DragonHoardAction : uint32 {
+	DragonHoardList     = 0,  // C2S
+	DragonHoardCapacity = 2,  // C2S query, S2C slot count in value
+	DragonHoardRetrieve = 3,  // C2S item_index and quantity in value, S2C echo
+	DragonHoardDeposit  = 4,  // C2S item_index
+	DragonHoardListEnd  = 8,  // S2C, ends every list
+	DragonHoardDone     = 10  // S2C, request finished or refused
+};
+
+struct DragonHoard_Struct {
+/*00*/ uint32 action;
+/*04*/ uint64 item_index; // the item's serial number, as in the serialized item
+/*12*/ uint32 value;
+/*16*/
+};
+
+// TOB+ Tradeskill Depot: stackable components kept as item id -> quantity; the TOB patch converts to and from
+// the wire layouts
+enum TradeskillDepotAction : uint32 {
+	TradeskillDepotOpen     = 0,  // C2S, the window was opened
+	TradeskillDepotCapacity = 4,  // C2S query, S2C row limit in value
+	TradeskillDepotDeposit  = 5,  // C2S item_index, S2C deposit finished
+	TradeskillDepotWithdraw = 6,  // C2S one item; S2C the client lowers each listed row by its quantity
+	TradeskillDepotItems    = 8,  // S2C every row; also turns the depot on in the client
+	TradeskillDepotDone     = 12  // S2C, request finished or refused
+};
+
+struct TradeskillDepotItem_Struct {
+/*00*/ uint32 item_id;
+/*04*/ uint32 quantity;
+/*08*/
+};
+
+struct TradeskillDepot_Struct {
+/*00*/ uint32 action;
+/*04*/ uint64 item_index; // deposit: the cursor item's serial number
+/*12*/ uint32 value;
+/*16*/ uint32 item_count;
+/*20*/ TradeskillDepotItem_Struct items[0];
+};
+
+// a list of items for one window, followed by item_count EQ::InternalSerializedItem_Struct
+struct ItemList_Struct {
+/*00*/ uint32 packet_type; // ItemPacketType
+/*04*/ uint32 item_count;
+/*08*/
+};
+
+// TOB+ Marketplace: offers come from marketplace_offers; the TOB patch writes the client's offer records
+struct MarketplaceOffer_Struct {
+/*000*/ uint32 offer_id;
+/*004*/ uint32 item_id;
+/*008*/ uint32 icon;
+/*012*/ uint32 price;
+/*016*/ uint8  is_new;
+/*017*/ char   name[64];
+/*081*/ char   category[128]; // "Top/Sub", the client builds its category tree from these paths
+/*209*/ char   description[512];
+/*721*/ uint8  is_featured; // listed under Featured Items
+/*722*/
+};
+
+struct MarketplaceCatalog_Struct {
+/*00*/ uint32                  offer_count;
+/*04*/ MarketplaceOffer_Struct offers[0];
+};
+
+// previews a mount, familiar or illusion as a model instead of an item
+struct MarketplaceModelPreview_Struct {
+/*00*/ uint32 spawn_id;     // the player for an illusion on themselves, 0 for a separate model
+/*04*/ char   name[64];
+/*68*/ uint32 race;
+/*72*/ uint8  gender;
+/*73*/ uint8  texture;
+/*74*/ uint8  helm_texture;
+/*75*/ uint8  unknown075;
+/*76*/ float  size;
+/*80*/
+};
+
+struct MarketplaceOfferStateEntry_Struct {
+/*00*/ uint32 offer_id;
+/*04*/ uint32 preview_item_id; // the Preview tab asks for this item; 0 = no preview
+/*08*/
+};
+
+// the window lists an offer only after it is reported shown here
+struct MarketplaceOfferState_Struct {
+/*00*/ uint32                             offer_count;
+/*04*/ MarketplaceOfferStateEntry_Struct offers[0];
+};
+
+struct MarketplaceBalance_Struct {
+/*00*/ int32 balance; // funds shown in the window
+/*04*/
+};
+
+struct MarketplacePurchase_Struct {
+/*00*/ uint32 offer_id;
+/*04*/ uint32 quantity;
+/*08*/
+};
+
+// result codes the client has messages for
+enum MarketplacePurchaseResult : uint32 {
+	MarketplacePurchaseSuccess           = 0,
+	MarketplacePurchaseDuplicateLore     = 2,
+	MarketplacePurchaseInventoryFull     = 3,
+	MarketplacePurchaseInvalidItem       = 4,
+	MarketplacePurchaseInsufficientFunds = 6
+};
+
+struct MarketplacePurchaseResult_Struct {
+/*00*/ uint32 offer_id;
+/*04*/ uint32 result; // MarketplacePurchaseResult
+/*08*/
+};
+
+struct AchievementCompareRequest_Struct {
+/*00*/ uint32 target_id;
+/*04*/ uint32 requester_id;
+/*08*/
 };
 
 //variable length packet of points
@@ -4868,8 +5077,16 @@ struct MarkNPC_Struct
 };
 
 struct InspectBuffs_Struct {
-/*000*/ uint32 spell_id[BUFF_COUNT];
+/*000*/ int32 spell_id[BUFF_COUNT];
 /*100*/ int32 tics_remaining[BUFF_COUNT];
+};
+
+// TOB+ inspectors: the same lists plus the target, the caster of each buff and the "mine" filter flag
+struct InspectBuffsTOB_Struct {
+	InspectBuffs_Struct buffs;
+	uint32 target_id;
+	uint32 caster_id[BUFF_COUNT];
+	uint8  cast_by_you;
 };
 
 struct RaidGeneral_Struct {
@@ -5137,7 +5354,7 @@ struct SendAA_Struct {
 /*0040*/	uint32 prereq_skill;		//is < 0, abs() is category #
 /*0044*/	uint32 prereq_minpoints; //min points in the prereq
 /*0048*/	uint32 type;
-/*0052*/	uint32 spellid;
+/*0052*/	int32  spellid;
 /*0056*/	uint32 spell_type;
 /*0060*/	uint32 spell_refresh;
 /*0064*/	uint16 classes;
@@ -5327,7 +5544,7 @@ typedef struct {
 struct ControlBoat_Struct {
 /*000*/	uint32	boatId;			// entitylist id of the boat
 /*004*/	bool	TakeControl;	// 01 if taking control, 00 if releasing it
-/*007*/	char	unknown[3];		// no idea what these last three bytes represent
+/*005*/	char	unknown[3];		// no idea what these last three bytes represent
 };
 
 struct AugmentInfo_Struct
@@ -5638,7 +5855,7 @@ struct HideCorpse_Struct
 struct BuffIconEntry_Struct
 {
 	uint32 buff_slot;
-	uint32 spell_id;
+	int32 spell_id;
 	int32 tics_remaining;
 	uint32 num_hits;
 	char caster[64];
@@ -5649,7 +5866,7 @@ struct BuffIcon_Struct
 	uint32 entity_id;
 	uint8  all_buffs;
 	uint16 count;
-	uint8 type; // 0 = self buff window, 1 = self target window, 4 = group, 5 = PC, 7 = NPC
+	uint8 type; // 0 = self buff window, 1 = self target window, 2 = pet buff or target window, 4 = group, 5 = PC, 7 = NPC
 	int32 tic_timer;
 	int32 name_lengths; // so ahh we kind of do these packets hacky, this is the total length of all the names to make creating the real packets in the translators easier
 	BuffIconEntry_Struct entries[0];
@@ -6237,6 +6454,12 @@ struct SuspendMercenary_Struct {
 /*0001*/
 };
 
+// [OPCode: 0x1b37 (RoF2)] [Client->Server] [Size: 4]
+struct SwitchMercenary_Struct {
+/*0000*/	uint32	MercIndex;	// 0-based UI index into owned merc list
+/*0004*/
+};
+
 // [OPCode: 0x2528] On Live as of April 2 2012 [Server->Client] [Size: 4]
 // Response to suspend merc with timestamp
 struct SuspendMercenaryResponse_Struct {
@@ -6560,6 +6783,22 @@ struct EvolveGetNextItem {
 	uint64 new_current_amount;
 	uint64 from_current_amount;
 	uint32 max_transfer_level;
+};
+
+// Character Create Data
+struct RaceClassAllocation {
+	unsigned int Index;
+	unsigned int BaseStats[7];
+	unsigned int DefaultPointAllocation[7];
+};
+
+struct RaceClassCombos {
+	unsigned int ExpansionRequired;
+	unsigned int Race;
+	unsigned int Class;
+	unsigned int Deity;
+	unsigned int AllocationIndex;
+	unsigned int Zone;
 };
 
 // Restore structure packing to default

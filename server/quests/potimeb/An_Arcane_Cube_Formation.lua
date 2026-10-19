@@ -1,3 +1,5 @@
+local charm_credit = require("potimeb_charm_credit");
+
 --An_Arcane_Cube_Formation
 --Phase 3 Event
 --potimeb
@@ -10,6 +12,13 @@ function event_combat(e)
 end
 
 function event_death_complete(e)
-	-- send a signal to the zone_status that I died
-	eq.signal(223097,4);
+	charm_credit.death(e, { {223097, 4} });
+end
+
+function event_charm_start(e)
+	charm_credit.charm_start(e, { {223097, 4} });
+end
+
+function event_charm_end(e)
+	charm_credit.charm_end(e);
 end

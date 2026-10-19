@@ -1433,4 +1433,233 @@ sub pop_raid_block_overrides {
     };
 }
 
+#=============================================================================
+# LOY - Zone-to-Expansion Mapping (zoneidnumber values)
+#=============================================================================
+
+sub loy_zone_ids {
+    return {
+        # 182 nedaria intentionally omitted — already mapped in classic_zone_ids
+        # as a low-level hub (like 151 bazaar / 181 jaggedpine).
+        224 => 1,  # gunthak
+        225 => 1,  # dulak
+        226 => 1,  # torgiran
+        227 => 1,  # nadox
+        228 => 1,  # hatesfury
+        277 => 1,  # chardokb
+        278 => 1,  # soldungc
+    };
+}
+
+#=============================================================================
+# LOY - Rare/Named Mob Pools
+# Disabled intentionally (same as PoP). LoY rare/common bonus loot rolls
+# eligible rare_spawn NPC loottables directly via add_rare_spawn_loottable_roll.
+#=============================================================================
+
+sub loy_rare_pools {
+    return {};
+}
+
+#=============================================================================
+# LOY - Level Block Definitions (rare loottable-roll source selection)
+# Bands chosen so each block has several rare_spawn source NPCs:
+#   1: Gunthak lowbie nameds          3: Nadox / Hate's Fury / Torgiran / Chardok B
+#   2: Gunthak high, Dulak, Torgiran  4: Chardok B, Caverns of Exile, 60+ nameds
+#=============================================================================
+
+sub loy_level_blocks {
+    return [
+        { block => 1, min => 1,  max => 44  },
+        { block => 2, min => 45, max => 53  },
+        { block => 3, min => 54, max => 59  },
+        { block => 4, min => 60, max => 255 },
+    ];
+}
+
+#=============================================================================
+# LOY - Raid Pools (level-banded by boss level, triggered by IsRaidTarget)
+# Source: DB query 2026-09-04 — equippable items from raid_target NPCs in
+# LoY zones, plus Hate's Fury named drops (live raid zone) to pad block 1.
+# Excluded: 52034 Zraxthril Forged Flamberge (100% event junk on Varns).
+#=============================================================================
+
+sub loy_raid_pools {
+    return {
+        # Block 1: boss level <=65 — Krasnok, Broodmother (raid_target since rev 3);
+        # items: Spiritseeker Nadox + Hate's Fury named drops (33 items)
+        1 => [
+            40004, 40014, 40026, 40028, 40030, 40049, 40060, 40071,
+            40078, 40107, 40113, 40116, 40141, 40151, 40152, 40159,
+            40163, 40173, 40196, 40207, 40217, 40238, 40258, 40284,
+            40299, 40305, 40310, 40316, 40346, 40347, 40366, 79888,
+            79889
+        ],
+        # Block 2: boss level 66+ — Korucust, Innoruuk (raid_target since rev 3);
+        # items: Korucust, Captain Varns, Culthor drops (13 items)
+        2 => [
+            55197, 55198, 55215, 55220, 55224, 55237, 55238, 61203,
+            61208, 61209, 61210, 79880, 79881
+        ],
+    };
+}
+
+#=============================================================================
+# LOY - Raid Level Block Definitions
+#=============================================================================
+
+sub loy_raid_level_blocks {
+    return [
+        { block => 1, min => 1,  max => 65  },
+        { block => 2, min => 66, max => 255 },
+    ];
+}
+
+
+#=============================================================================
+# GOD - Zone-to-Expansion Mapping (zoneidnumber values)
+# 279 abysmal is included so it maps to 'god', but is excluded as a rare-roll
+# source in ascendant_loot_utils.pl _rare_pool_zone_ids (hub, like PoK/PoTranq).
+# 299 qvicb / 998 fhalls (GM-only) omitted.
+#=============================================================================
+
+sub god_zone_ids {
+    return {
+        279 => 1,  # abysmal (hub)
+        280 => 1,  # natimbi
+        281 => 1,  # qinimi
+        282 => 1,  # riwwi
+        283 => 1,  # barindu
+        284 => 1,  # ferubi
+        285 => 1,  # snpool
+        286 => 1,  # snlair
+        287 => 1,  # snplant
+        288 => 1,  # sncrematory
+        289 => 1,  # tipt
+        290 => 1,  # vxed
+        291 => 1,  # yxtta
+        292 => 1,  # uqua
+        293 => 1,  # kodtaz
+        294 => 1,  # ikkinz
+        295 => 1,  # qvic
+        296 => 1,  # inktuta
+        297 => 1,  # txevu
+        298 => 1,  # tacvi
+    };
+}
+
+#=============================================================================
+# GOD - Rare/Named Mob Pools
+# Disabled intentionally (same as PoP/LoY). GoD rare/common bonus loot rolls
+# eligible rare_spawn NPC loottables directly via add_rare_spawn_loottable_roll.
+#=============================================================================
+
+sub god_rare_pools {
+    return {};
+}
+
+#=============================================================================
+# GOD - Level Block Definitions (rare loottable-roll source selection)
+#   1: Natimbi/Qinimi/Barindu low nameds   3: Sewers/Ferubi/Kod'Taz/Tipt
+#   2: Qinimi/Riwwi/Sewers                  4: Kod'Taz/Yxtta/Qvic/Vxed/Ikkinz 67+
+#=============================================================================
+
+sub god_level_blocks {
+    return [
+        { block => 1, min => 1,  max => 54  },
+        { block => 2, min => 55, max => 62  },
+        { block => 3, min => 63, max => 66  },
+        { block => 4, min => 67, max => 255 },
+    ];
+}
+
+#=============================================================================
+# GOD - Raid Pools (level-banded by boss level, triggered by IsRaidTarget)
+# Source: DB query 2026-09-26 — equippable items (non-aug/book/summoned) with a
+# T3 variant, dropped by the 126 GoD raid_target NPCs (2026_09_26_god_named_flags.sql);
+# block = highest level of the dropping boss. Uqua trinkets 67736-67739 excluded.
+#=============================================================================
+
+sub god_raid_pools {
+    return {
+        # Block 1: boss level <=70 — Natimbi/Qinimi/Riwwi/Barindu/Ferubi/Yxtta/Kod'Taz raids, Uqua adds, Ikkinz trials 1-2, Qvic arbitors (98 items)
+        1 => [
+            52111, 52113, 52114, 52116, 52118, 52119, 52125, 68358,
+            68359, 68360, 68361, 68362, 68363, 68364, 68365, 68366,
+            68367, 68442, 68443, 68444, 68445, 68446, 68447, 68448,
+            68449, 68547, 68548, 68550, 68551, 68553, 68554, 68556,
+            68557, 68559, 68560, 68562, 68563, 68565, 68566, 68568,
+            68569, 68637, 68638, 68639, 68640, 68641, 68642, 68643,
+            68644, 68645, 68646, 68647, 68648, 68649, 68650, 68651,
+            68652, 68653, 68654, 68655, 68656, 68657, 68658, 68659,
+            68660, 68661, 68662, 68663, 68664, 68665, 68666, 68670,
+            68671, 68672, 68703, 68704, 68705, 68706, 68708, 68709,
+            68710, 68711, 68712, 68713, 68714, 68715, 68719, 68722,
+            68744, 68745, 68746, 68747, 68758, 68772, 68780, 68788,
+            68802, 68803
+        ],
+        # Block 2: boss level 71-74 — Qvic, Uqua final, Ikkinz, Inktu`Ta, Tacvi Pixtt (68 items)
+        2 => [
+            52115, 52432, 68549, 68552, 68555, 68558, 68561, 68564,
+            68567, 68570, 68723, 68724, 68725, 68740, 68741, 68742,
+            68743, 68748, 68749, 68750, 68751, 68752, 68753, 68754,
+            68755, 68756, 68757, 68771, 68773, 68775, 68778, 68779,
+            68781, 68782, 68783, 68785, 68786, 68787, 68789, 68790,
+            68808, 68834, 68835, 68837, 68838, 68840, 68841, 68842,
+            68843, 68844, 68845, 68846, 68847, 68848, 69131, 69133,
+            69155, 69156, 69157, 69158, 69159, 69160, 69161, 69162,
+            69168, 69169, 69175, 69176
+        ],
+        # Block 3: boss level 75-77 — Txevu minis, Tacvi Zun`Murams, Ikkinz 3 final (55 items)
+        3 => [
+            68770, 68776, 68777, 68784, 69041, 69046, 69068, 69071,
+            69072, 69073, 69076, 69077, 69079, 69081, 69083, 69086,
+            69088, 69090, 69095, 69096, 69097, 69098, 69110, 69111,
+            69112, 69113, 69114, 69115, 69116, 69117, 69118, 69119,
+            69120, 69121, 69122, 69123, 69124, 69125, 69130, 69132,
+            69134, 69135, 69154, 69163, 69164, 69165, 69166, 69177,
+            69178, 69179, 69251, 69252, 69253, 69254, 69255
+        ],
+        # Block 4: boss level 78+ and zone-final overrides — Txevu/Tacvi/Inktu`Ta finals (50 items)
+        4 => [
+            69040, 69042, 69043, 69044, 69045, 69047, 69048, 69049,
+            69050, 69051, 69052, 69053, 69054, 69055, 69056, 69057,
+            69060, 69061, 69062, 69063, 69064, 69065, 69066, 69067,
+            69069, 69070, 69074, 69075, 69078, 69080, 69082, 69084,
+            69085, 69087, 69089, 69099, 69100, 69106, 69126, 69127,
+            69128, 69129, 69146, 69147, 69148, 69149, 69150, 69151,
+            69152, 69153
+        ],
+    };
+}
+
+#=============================================================================
+# GOD - Raid Level Block Definitions
+#=============================================================================
+
+sub god_raid_level_blocks {
+    return [
+        { block => 1, min => 1,  max => 70  },
+        { block => 2, min => 71, max => 74  },
+        { block => 3, min => 75, max => 77  },
+        { block => 4, min => 78, max => 255 },
+    ];
+}
+
+#=============================================================================
+# GOD - Raid block overrides: zone finals roll the top block regardless of level
+#=============================================================================
+
+sub god_raid_block_overrides {
+    return {
+        292069 => 4,   # #Vrex_Barxt_Qurat (Uqua final, L73)
+        294595 => 4,   # #Vrex_Xalkak_Nixki (Ikkinz raid 3 final, L75)
+        294620 => 4,   # #Keeper_of_the_Altar (Ikkinz raid 4 final, L72)
+        295130 => 4,   # Iqthinxa_Karnkvi (Qvic final, L74)
+        295150 => 4,   # #Iqthinxa_Karnkvi (Qvic final, L74)
+        296052 => 4,   # #Noqufiel (Inktu`Ta final phase, L73)
+        298014 => 4,   # #Tunat`Muram_Cuu_Vauax (Tacvi final, L77)
+    };
+}
+
 return 1;

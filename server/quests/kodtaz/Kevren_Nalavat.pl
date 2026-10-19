@@ -213,6 +213,10 @@ sub PROGRESS_UPDATE {
   if ($qglobals{ikky} >= 7) {
     $client->Message(14, "Finished! - You've successfully translated the glyphs you found in the Temple of the Damned!");
   }
+  # Ascendant: the Summoning Circle glyph is a side task (ikkyalt), show it so players know it counted
+  if (defined($qglobals{ikkyalt}) && ($qglobals{ikkyalt} >= 8)) {
+    $client->Message(14, "Finished! - You were able to recover a rare artifact from the Grand Summoner's goons in the Summoning Circle!");
+  }
   if ($qglobals{ikky} >= 8) {
     $client->Message(14, "Finished! - You have collected the four Frayed Flesh Scraps from the Crumbled Sanctuary of Divine Destruction!");
   }

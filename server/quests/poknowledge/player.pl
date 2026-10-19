@@ -3,9 +3,6 @@ sub EVENT_ENTERZONE {
 	{
 		quest::assigntask(5745); #Force assign Task: New Beginnings
 	}
-
-	set_current_position();
-	quest::settimer("check_idle", 1200);
 }
 
 sub EVENT_CLICKDOOR {
@@ -147,21 +144,4 @@ sub EVENT_TIMER {
 	if ($timer == 6) {
 		quest::movepc(383, -173, -188, -69, 192); # Zone: freeportwest
 	}
-
-	if ($timer eq "check_idle") {
-		my $last_x  = $client->GetEntityVariable("last_x");
-		my $last_y  = $client->GetEntityVariable("last_y");
-		my $is_idle = ($last_x eq $client->GetX() && $last_y eq $client->GetY());
-
-		if ($is_idle && $uguild_id > 0) {
-			$client->SendToGuildHall();
-		}
-
-		set_current_position();
-	}
-}
-
-sub set_current_position() {
-	$client->SetEntityVariable("last_x", $client->GetX());
-	$client->SetEntityVariable("last_y", $client->GetY());
 }

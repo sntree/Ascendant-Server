@@ -66,14 +66,13 @@ function P3_Trash_Timer(e)
 		return;
 	end
 
-	local top_hate = e.self:GetHateTop();
-	if top_hate.valid and top_hate:GetZ() < P3_MIN_Z then
-		reset_under_floor_pull(e);
-		return;
-	end
-
+	-- Only reset when the MOB itself has been dragged under the floor.
+	-- Do NOT key off the top-hate player's Z: legitimate raiders can be
+	-- below P3_MIN_Z (lower areas, knockback, pets, a straggler in the
+	-- phase 2 area), which would otherwise wipe hate and heal the mob to
+	-- full every 2 seconds and brick the encounter.
 	if e.self:GetZ() < P3_MIN_Z then
-		move_home(e);
+		reset_under_floor_pull(e);
 	end
 end
 

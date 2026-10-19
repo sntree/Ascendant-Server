@@ -1,6 +1,8 @@
 --[[
  Bertox Event ## By Drogerin
 --]]
+local charm_credit = require("charm_credit");
+
 local trash_dead			= 0;
 local wave_trash_dead		= 0;
 local forced_trash_dead		= 0;
@@ -318,6 +320,14 @@ function Trash_Death(e)
 	end
 end
 
+function Trash_Credit(e)
+	charm_credit.credit_once(e, Trash_Death, "codecay_bert_trash_charm_credited");
+end
+
+function Trash_Charm_End(e)
+	charm_credit.depop_on_charm_end(e, "codecay_bert_trash_charm_credited");
+end
+
 function Adan_Death(e)
 	MaybeStartNextTrashWave();
 end
@@ -387,12 +397,11 @@ function event_encounter_load(e)
 	eq.register_npc_event('Bert', Event.timer, 					200056, Summoner_Timer);
 	
 	
-	eq.register_npc_event('Bert', Event.death_complete, 200042, 			Trash_Death);
-	eq.register_npc_event('Bert', Event.death_complete, 200043, 			Trash_Death);
-	eq.register_npc_event('Bert', Event.death_complete, 200062, 			Trash_Death);
-	eq.register_npc_event('Bert', Event.death_complete, 200063, 			Trash_Death);
-	eq.register_npc_event('Bert', Event.death_complete, 200064, 			Trash_Death);
-	eq.register_npc_event('Bert', Event.death_complete, 200065, 			Trash_Death);
+	for _, npc_id in ipairs(trash_ids) do
+		eq.register_npc_event('Bert', Event.death_complete, npc_id, Trash_Credit);
+		eq.register_npc_event('Bert', Event.charm_start, npc_id, Trash_Credit);
+		eq.register_npc_event('Bert', Event.charm_end, npc_id, Trash_Charm_End);
+	end
 
 	for _, npc_id in ipairs(first_adans) do
 		eq.register_npc_event('Bert', Event.death_complete, npc_id, Adan_Death);

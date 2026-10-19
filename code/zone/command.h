@@ -1,3 +1,20 @@
+/*	EQEmu: EQEmulator
+
+	Copyright (C) 2001-2026 EQEmu Development Team
+
+	This program is free software; you can redistribute it and/or modify
+	it under the terms of the GNU General Public License as published by
+	the Free Software Foundation; either version 3 of the License, or
+	(at your option) any later version.
+
+	This program is distributed in the hope that it will be useful,
+	but WITHOUT ANY WARRANTY; without even the implied warranty of
+	MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+	GNU General Public License for more details.
+
+	You should have received a copy of the GNU General Public License
+	along with this program. If not, see <http://www.gnu.org/licenses/>.
+*/
 #pragma once
 
 #include "common/types.h"
@@ -8,14 +25,15 @@ class Client;
 class Seperator;
 
 #define    COMMAND_CHAR '#'
+#define    COMMAND_CHAR_NON_HASH '$'
 
 typedef void (*CmdFuncPtr)(Client *, const Seperator *);
 
-typedef struct {
+struct CommandRecord {
 	uint8 admin;
 	std::string description;
 	CmdFuncPtr function; // null means perl function
-} CommandRecord;
+};
 
 extern int (*command_dispatch)(Client *, std::string, bool);
 extern int command_count; // Commands Loaded Count
@@ -42,7 +60,9 @@ void SendEvolvingItemsSubCommands(Client *c);
 
 // Commands
 void command_acceptrules(Client *c, const Seperator *sep);
+void command_achievement(Client *c, const Seperator *sep);
 void command_adventure(Client *c, const Seperator *sep);
+void command_advloottest(Client *c, const Seperator *sep);
 void command_advnpcspawn(Client *c, const Seperator *sep);
 void command_aggrozone(Client *c, const Seperator *sep);
 void command_ai(Client *c, const Seperator *sep);
@@ -68,6 +88,7 @@ void command_delacct(Client *c, const Seperator *sep);
 void command_delpetition(Client *c, const Seperator *sep);
 void command_depop(Client *c, const Seperator *sep);
 void command_depopzone(Client *c, const Seperator *sep);
+void command_depot(Client *c, const Seperator *sep);
 void command_devtools(Client *c, const Seperator *sep);
 void command_disablerecipe(Client *c, const Seperator *sep);
 void command_disarmtrap(Client *c, const Seperator *sep);
@@ -118,6 +139,7 @@ void command_load_shared_memory(Client *c, const Seperator *sep);
 void command_loc(Client *c, const Seperator *sep);
 void command_logs(Client *c, const Seperator *sep);
 void command_makepet(Client *c, const Seperator *sep);
+void command_marketplacecoins(Client *c, const Seperator *sep);
 void command_memspell(Client *c, const Seperator *sep);
 void command_merchantshop(Client *c, const Seperator *sep);
 void command_modifynpcstat(Client *c, const Seperator *sep);

@@ -42,3 +42,10 @@ Thumbs.db
 core.*
 **/core.*
 server/core.*
+
+# config backups/variants (contain DB passwords)
+**/eqemu_config.json.*
+
+# RoF2/ToB client files and client-extracted art (large, not ours to distribute)
+server/tob-client/
+server/bin/assets-tob/

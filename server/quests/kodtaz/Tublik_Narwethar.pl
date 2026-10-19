@@ -49,17 +49,17 @@ sub EVENT_SAY {
   if (($text=~/more clues/i) && defined($qglobals{ikky}) && ($qglobals{ikky} == 9)) {
     quest::say("I need you to return to the three temples where you participated in the three trials. Based on this clue, I believe you will find three additional clues about the Altar of Destruction in the Temple of Singular Might, the Temple of Twin Struggles, and the Temple of the Tri-Fates. I doubt they'll be hard to find, but you must go to each and search for the clues! Return to me when you have found them!");
   }
-  if (($text=~/pit of the lost/i) && defined($qglobals{ikky}) && ($qglobals{ikky} >= 10)) {
+  if (($text=~/pit of the lost/i) && defined($qglobals{ikky}) && ($qglobals{ikky} >= 7)) {
     quest::say("I see Kevren finally sent someone to me to look into the pit. It's about time! I've been telling him over and over that there are some really strange things going on in the Pit of the Lost to the north of here, but he just doesn't seem to want to pay enough attention to the claims. In any case, you're here now and that means that you must be [" . quest::saylink("willing to look") . "] into the odd occurrences, right?");
   } 
-  if (($text=~/willing to look/i) && defined($qglobals{ikky}) && ($qglobals{ikky} >= 10)) {
+  if (($text=~/willing to look/i) && defined($qglobals{ikky}) && ($qglobals{ikky} >= 7)) {
     quest::say("I'm glad I can count on you. You need to know a couple things before you go. As I said, there are strange things going on in the pit, but we're not sure what they are yet. We have sensed an energy force emanating from that area and believe there are some kind of artifacts there that must be collected. We need you to [" . quest::saylink("collect the artifacts") . "] and return them so we can study them.");
   }
-  if (($text=~/collect the artifacts/i) && defined($qglobals{ikky}) && ($qglobals{ikky} >= 10)) {
+  if (($text=~/collect the artifacts/i) && defined($qglobals{ikky}) && ($qglobals{ikky} >= 7)) {
     quest::emote("hands you a bag. 'Place four artifacts you find from the pit in this bag and seal it off. Return the sealed bag to me when you're done so I can further examine what you find. Make haste to the Pit of the Lost and be careful -- there's no telling what kind of evils are waiting for you there. If you have someone else with you that [needs a bag], have them tell me so.'");
     quest::summonitem(60155); # Item: Tublik's Bag
   }
-  if (($text=~/stop it/i) && defined($qglobals{ikky}) && ($qglobals{ikky} >= 10) && !defined($qglobals{ageless})) {
+  if (($text=~/stop it/i) && defined($qglobals{ikky}) && ($qglobals{ikky} >= 7) && !defined($qglobals{ageless})) {
     quest::say("You must return to the Pit of the Lost and find whatever this fiend is and destroy it. I believe that it will have some kind of artifact that is linked to the ones you returned to me in the sealed bag. Return whatever it may have to me. Good luck, $name, I have no doubt that the artifact it holds will be as interesting of a find as anything else we've uncovered so far!");
     quest::spawn2(293221,0,0,2176,2184,-476,274); # NPC: Ageless_Relic_Protector
     quest::setglobal("ageless",1,0,"H8");
@@ -74,20 +74,30 @@ sub EVENT_SAY {
     quest::say("The power wasn't as noticeable before. Now, though, it seems there's a fiend in the pit that's become agitated by the removal of these objects we've been collecting. I believe that whatever is behind the energy disruption kept a watchful eye over those objects. Now that they're gone, I believe it will try to find them again and destroy anything and everything in its path in the process. You must [" . quest::saylink("stop it") . "] before it has a chance!");
 	quest::delglobal("ikkypit");
   }
+  # Ascendant: let players drop their Ikkinz trial instances and start over
+  if ($text=~/leave instance/i) {
+    my $left = 0;
+    foreach my $v (3, 4, 5) {
+      my $id = quest::GetInstanceID("ikkinz", $v);
+      if ($id > 0) { quest::RemoveFromInstance($id); $left++; }
+    }
+    $client->Message(15, $left ? "You have left your Ikkinz trial instance(s). Ask me about a temple to start or join one again." : "You are not in any Ikkinz trial instance.");
+  }
   if ($text=~/sanctuary of the righteous/i) {
-	if ($raid) {
-	    if ($raid->RaidCount() <= 54) {
+	if (1) { # Ascendant: solo-friendly, raid not required
+	    if (!$raid || $raid->RaidCount() <= 54) {
 		  if (!defined $qglobals{ikkylockout3}) {
 			if (defined($qglobals{ikky}) && ($qglobals{ikky} >= 10)) {
 			  if ($InIkkyV3 == 0) {
-				$Instance = quest::CreateInstance("ikkinz",3,21600);
-				quest::AssignRaidToInstance($Instance);   
+				my $party_inst = PARTY_IKKY_INSTANCE(3); # Ascendant: join a groupmate's instance instead of splitting
+				if ($party_inst) { $Instance = $party_inst; quest::AssignToInstance($Instance); }
+				else { $Instance = quest::CreateInstance("ikkinz",3,21600); ASSIGN_IKKY_INSTANCE($Instance); }   
 				quest::say("Instance added.");
 				$client->MarkCompassLoc(1340, -710, -433);
 				quest::say("The glyphs you recovered show an Artifact of Righteousness that is guarded by a sentinel that is ages old. You will find the Sanctuary of the Righteous to the south of the Altar of Destruction. You must gather a raiding party several times larger than your normal party's size and be prepared for anything. Find an entrance to the inner chambers of the Sanctuary of the Righteous and recover the artifact. May you be gifted with the luck of the brotherhood. I fear you may need it.");
 			  }
 			  else {
-				$client->Message(13, "You are already in an instance!");
+				$client->Message(13, "You already have this instance. Walk into the temple entrance (marked on your compass) to zone in; it expires 6 hours after it was created."); $client->MarkCompassLoc(1340, -710, -433); # Ascendant: re-mark entrance
 			  }
 			}
 		  }
@@ -103,19 +113,20 @@ sub EVENT_SAY {
     }
   }
   if ($text=~/sanctuary of the glorified/i) {
-    if ($raid) {
-		if ($raid->RaidCount() <= 54) {
+    if (1) { # Ascendant: solo-friendly, raid not required
+		if (!$raid || $raid->RaidCount() <= 54) {
 		  if (!defined($qglobals{ikkylockout4})) {
 			if (defined($qglobals{ikky}) && ($qglobals{ikky} >= 10)) {
 			  if ($InIkkyV4 == 0) {
-				$Instance = quest::CreateInstance("ikkinz",4,21600);
-				quest::AssignRaidToInstance($Instance);   
+				my $party_inst = PARTY_IKKY_INSTANCE(4); # Ascendant: join a groupmate's instance instead of splitting
+				if ($party_inst) { $Instance = $party_inst; quest::AssignToInstance($Instance); }
+				else { $Instance = quest::CreateInstance("ikkinz",4,21600); ASSIGN_IKKY_INSTANCE($Instance); }   
 				quest::say("Instance added.");
 				$client->MarkCompassLoc(2656, 442, -396);
 				quest::say("The glyphs you recovered show an Artifact of Glorification that is guarded by a sentinel that is ages old. You will find the Sanctuary of the Glorification to the south of the Altar of Destruction. You must gather a raiding party several times larger than your normal party's size and be prepared for anything. Find an entrance to the inner chambers of the Sanctuary of the Glorified and recover the artifact. May you be gifted with the luck of the brotherhood. I fear you may need it.");
 			  }
 			  else {
-				$client->Message(13, "You are already in an instance!");
+				$client->Message(13, "You already have this instance. Walk into the temple entrance (marked on your compass) to zone in; it expires 6 hours after it was created."); $client->MarkCompassLoc(2656, 442, -396); # Ascendant: re-mark entrance
 			  }
 			}
 		  }
@@ -131,19 +142,20 @@ sub EVENT_SAY {
     }
   }
   if ($text=~/sanctuary of the transcendent/i) {
-    if ($raid) {
-		if ($raid->RaidCount() <= 54) {
+    if (1) { # Ascendant: solo-friendly, raid not required
+		if (!$raid || $raid->RaidCount() <= 54) {
 		  if (!defined($qglobals{ikkylockout5})) {
 			if (defined($qglobals{ikky}) && ($qglobals{ikky} >= 10)) {
 			  if ($InIkkyV5 == 0) {
-				$Instance = quest::CreateInstance("ikkinz", 5, 21600);
-				quest::AssignRaidToInstance($Instance);   
+				my $party_inst = PARTY_IKKY_INSTANCE(5); # Ascendant: join a groupmate's instance instead of splitting
+				if ($party_inst) { $Instance = $party_inst; quest::AssignToInstance($Instance); }
+				else { $Instance = quest::CreateInstance("ikkinz",5,21600); ASSIGN_IKKY_INSTANCE($Instance); }   
 				quest::say("Instance added.");
 				$client->MarkCompassLoc(1573, 1737, -396);
 				quest::say("The glyphs you recovered show an Artifact of Transcendence that is guarded by a sentinel that is ages old. You will find the Sanctuary of the Transcendent to the south of the Altar of Destruction. You must gather a raiding party several times larger than your normal party's size and be prepared for anything. Find an entrance to the inner chambers of the Sanctuary of the Transcendent and recover the artifact. May you be gifted with the luck of the brotherhood. I fear you may need it.");
 			  }
 			  else {
-				$client->Message(13, "You are already in an instance!");
+				$client->Message(13, "You already have this instance. Walk into the temple entrance (marked on your compass) to zone in; it expires 6 hours after it was created."); $client->MarkCompassLoc(1573, 1737, -396); # Ascendant: re-mark entrance
 			  }
 			}
 		  }
@@ -248,11 +260,14 @@ sub EVENT_ITEM {
       quest::say("You can't have this? What kind of trickery is this? I'm alerting the proper autorities you thief.");
     }
   }
-  if (defined($qglobals{ikky}) && ($qglobals{ikky} >= 10)) {
+  # Ascendant: Pit of the Lost opens at ikky 7 (eqprogression guide #5, before Crumbled Sanctuary #6)
+  if (defined($qglobals{ikky}) && ($qglobals{ikky} >= 7)) {
     if (plugin::check_handin(\%itemcount, 60160 => 1)) {
       quest::say("You're done already? I wasn't expecting such a prompt response, but nicely done $name! Give me a while to examine these artifacts. I should have some additional information for you once you return.");
       quest::setglobal("ikkypit",1,5,"F");
-    }  
+    }
+  }
+  if (defined($qglobals{ikky}) && ($qglobals{ikky} >= 10)) {
     if (plugin::check_handin(\%itemcount, 60170 => 1)) {
       if (!defined($qglobals{ikkyraid})) {
 	    quest::say("You've done it! You've recovered the first of the three artifacts! You must keep this with you, as you'll need it once you've recovered all three artifacts. You only need two more -- one from [" . quest::saylink("Sanctuary of the Glorified") . "], and one from the [" . quest::saylink("Sanctuary of the Transcendent") . "]. Which do you think you'd like to do next?");
@@ -337,4 +352,32 @@ sub PROGRESS_UPDATE {
   if ($qglobals{ikky} == 14) {
     $client->Message(14, "Finished! - You've constructed your Icon of the Altar!");
   }
+}
+
+# Ascendant: solo-friendly - assign the raid, else the group, else just the requester
+sub ASSIGN_IKKY_INSTANCE {
+  my $instance_id = shift;
+  if ($client->GetRaid()) {
+    quest::AssignRaidToInstance($instance_id);
+  } elsif ($client->GetGroup()) {
+    quest::AssignGroupToInstance($instance_id);
+  } else {
+    quest::AssignToInstance($instance_id);
+  }
+}
+
+# Ascendant: an existing ikkinz trial instance (version 3/4/5) held by anyone in the requester's raid or group
+sub PARTY_IKKY_INSTANCE {
+  my $version = shift;
+  my @members;
+  if (my $r = $client->GetRaid()) {
+    for (my $i = 0; $i < 72; $i++) { my $m = $r->GetMember($i); push @members, $m if $m; }
+  } elsif (my $g = $client->GetGroup()) {
+    for (my $i = 0; $i < 6; $i++) { my $m = $g->GetMember($i); push @members, $m->CastToClient() if $m && $m->IsClient(); }
+  }
+  foreach my $m (@members) {
+    my $id = quest::GetInstanceIDByCharID("ikkinz", $version, $m->CharacterID());
+    return $id if $id > 0;
+  }
+  return 0;
 }

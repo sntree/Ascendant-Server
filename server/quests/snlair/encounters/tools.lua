@@ -146,7 +146,8 @@ local function trigger_spawn(e)
   local npc_list = eq.get_entity_list():GetNPCList()
   for npc in npc_list.entries do
     local npc_id = npc:GetNPCTypeID()
-    if npc.valid and npc_id ~= e.self:GetNPCTypeID() and npc_id ~= 286098 then -- Alej_Leraji
+    if npc.valid and npc_id ~= e.self:GetNPCTypeID() and npc_id ~= 286098 -- Alej_Leraji
+      and not npc:HasOwner() and npc:GetSwarmOwner() == 0 then -- Ascendant: keep player pets, charmed mobs, familiars, swarm pets
       npc:Depop(false)
     end
   end

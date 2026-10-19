@@ -1,3 +1,10 @@
+-- Ascendant: scope event state per instance (public zone keeps its original key)
+local function inst_key(key)
+	local instance_id = eq.get_zone_instance_id();
+	if instance_id == 0 then return key end
+	return key .. "-inst" .. instance_id;
+end
+
 -- Primal Door
 
 local question			=	0;	-- Current question number
@@ -52,7 +59,7 @@ local door_order	=	{
 }
 
 function enterzone(e)
-	local primal_door_status = tonumber(eq.get_data("primal_door_status")) or 0
+	local primal_door_status = tonumber(eq.get_data(inst_key("primal_door_status"))) or 0
 
 	if not primal_door_status then	-- Lock the Primal Doors if no global/expired
 		eq.get_entity_list():FindDoor(16):SetLockPick(-1);
@@ -74,7 +81,7 @@ end
 
 function event_click_door(e)
 	local door = e.door:GetDoorID();
-	local primal_door_status = tonumber(eq.get_data("primal_door_status")) or 0
+	local primal_door_status = tonumber(eq.get_data(inst_key("primal_door_status"))) or 0
 	
 	-- Zkr Epic 1.5 Ferns
 	if door == 37 or door == 39 or door == 41 then
@@ -144,10 +151,10 @@ function stone_attack(e)
 end
 
 function ask_question(e)
-	local primal_door_status = tonumber(eq.get_data("primal_door_status")) or 0
+	local primal_door_status = tonumber(eq.get_data(inst_key("primal_door_status"))) or 0
 
 	if question == 12 then -- Event Win
-		eq.set_data("primal_door_status","1",tostring(eq.seconds("210M"))); -- 3.5 Hours
+		eq.set_data(inst_key("primal_door_status"),"1",tostring(eq.seconds("210M"))); -- 3.5 Hours
 		eq.get_entity_list():FindDoor(16):SetLockPick(0);
 		eq.zone_emote(MT.Red, "The pathway is now clear, but your time is limited.");
 		eq.stop_timer("click_timer");

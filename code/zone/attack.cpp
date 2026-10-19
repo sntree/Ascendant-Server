@@ -1,21 +1,20 @@
-/*	EQEMu: Everquest Server Emulator
-Copyright (C) 2001-2002 EQEMu Development Team (http://eqemulator.net)
+/*	EQEmu: EQEmulator
 
-This program is free software; you can redistribute it and/or modify
-it under the terms of the GNU General Public License as published by
-the Free Software Foundation; version 2 of the License.
+	Copyright (C) 2001-2026 EQEmu Development Team
 
-This program is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY except by those people which sell it, which
-are required to give you total support for your newly bought product;
-without even the implied warranty of MERCHANTABILITY or FITNESS FOR
-A PARTICULAR PURPOSE. See the GNU General Public License for more details.
+	This program is free software; you can redistribute it and/or modify
+	it under the terms of the GNU General Public License as published by
+	the Free Software Foundation; either version 3 of the License, or
+	(at your option) any later version.
 
-You should have received a copy of the GNU General Public License
-along with this program; if not, write to the Free Software
-Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
+	This program is distributed in the hope that it will be useful,
+	but WITHOUT ANY WARRANTY; without even the implied warranty of
+	MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+	GNU General Public License for more details.
+
+	You should have received a copy of the GNU General Public License
+	along with this program. If not, see <http://www.gnu.org/licenses/>.
 */
-
 #include "common/data_verification.h"
 #include "common/classes.h"
 #include "common/eq_constants.h"
@@ -27,6 +26,7 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
 #include "common/strings.h"
 #include "zone/bot.h"
 #include "zone/client.h"
+#include "zone/client_version.h"
 #include "zone/fastmath.h"
 #include "zone/lua_parser.h"
 #include "zone/mob.h"
@@ -1852,7 +1852,7 @@ bool Mob::Attack(Mob* other, int Hand, bool bRiposte, bool IsStrikethrough, bool
 	}
 }
 
-void Client::Damage(Mob* other, int64 damage, uint16 spell_id, EQ::skills::SkillType attack_skill, bool avoidable, int8 buffslot, bool iBuffTic, eSpecialAttacks special)
+void Client::Damage(Mob* other, int64 damage, int32 spell_id, EQ::skills::SkillType attack_skill, bool avoidable, int8 buffslot, bool iBuffTic, eSpecialAttacks special)
 {
 	if (dead || IsCorpse())
 		return;
@@ -1889,7 +1889,7 @@ void Client::Damage(Mob* other, int64 damage, uint16 spell_id, EQ::skills::Skill
 	}
 }
 
-bool Client::Death(Mob* killer_mob, int64 damage, uint16 spell, EQ::skills::SkillType attack_skill, KilledByTypes killed_by, bool is_buff_tic)
+bool Client::Death(Mob* killer_mob, int64 damage, int32 spell, EQ::skills::SkillType attack_skill, KilledByTypes killed_by, bool is_buff_tic)
 {
 	if (!ClientFinishedLoading() || dead) {
 		return false;
@@ -2173,6 +2173,12 @@ bool Client::Death(Mob* killer_mob, int64 damage, uint16 spell, EQ::skills::Skil
 					}
 				}
 			}
+
+			// Other mobs' close lists hold this client under its current id, which the corpse takes over.
+			// Drop those entries now: after a hover respawn the client gets a new id, so they would never
+			// be removed and dangle once the client leaves (crash in Mob::IsCloseToBanker).
+			entity_list.RemoveMobFromCloseLists(this);
+			m_close_mobs.clear();
 
 			entity_list.AddCorpse(new_corpse, GetID());
 			SetID(0);
@@ -2508,7 +2514,7 @@ bool NPC::Attack(Mob* other, int Hand, bool bRiposte, bool IsStrikethrough, bool
 	return has_hit;
 }
 
-void NPC::Damage(Mob* other, int64 damage, uint16 spell_id, EQ::skills::SkillType attack_skill, bool avoidable, int8 buffslot, bool iBuffTic, eSpecialAttacks special) {
+void NPC::Damage(Mob* other, int64 damage, int32 spell_id, EQ::skills::SkillType attack_skill, bool avoidable, int8 buffslot, bool iBuffTic, eSpecialAttacks special) {
 	if (spell_id == 0)
 		spell_id = SPELL_UNKNOWN;
 
@@ -2545,7 +2551,7 @@ void NPC::Damage(Mob* other, int64 damage, uint16 spell_id, EQ::skills::SkillTyp
 	CommonDamage(other, damage, spell_id, attack_skill, avoidable, buffslot, iBuffTic, special);
 }
 
-bool NPC::Death(Mob* killer_mob, int64 damage, uint16 spell, EQ::skills::SkillType attack_skill, KilledByTypes killed_by, bool is_buff_tic)
+bool NPC::Death(Mob* killer_mob, int64 damage, int32 spell, EQ::skills::SkillType attack_skill, KilledByTypes killed_by, bool is_buff_tic)
 {
 	LogCombat(
 		"Fatal blow dealt by [{}] with [{}] damage, spell [{}], skill [{}]",
@@ -2625,6 +2631,15 @@ bool NPC::Death(Mob* killer_mob, int64 damage, uint16 spell, EQ::skills::SkillTy
 	}
 
 	auto* killer = GetHateDamageTop(this);
+
+	// aggro-immune NPCs (loot piles, chests) never build a hate list, so nobody got loot rights
+	// and the corpse sat locked until it unlocked for everyone; credit whoever landed the kill
+	if (!killer && killer_mob && GetSpecialAbility(SpecialAbility::AggroImmunity)) {
+		Mob* ultimate_owner = killer_mob->GetUltimateOwner();
+		if (ultimate_owner && ultimate_owner->IsClient()) {
+			killer = ultimate_owner;
+		}
+	}
 
 	entity_list.RemoveFromTargets(this, p_depop);
 
@@ -2992,6 +3007,7 @@ bool NPC::Death(Mob* killer_mob, int64 damage, uint16 spell, EQ::skills::SkillTy
 					}
 				}
 			}
+			corpse->StartAdvancedLoot(killer->CastToClient());
 		} else if (killer_mob && is_ldon_treasure) {
 			Mob* ultimate_owner = killer_mob->GetUltimateOwner();
 			if (ultimate_owner->IsClient()) {
@@ -3060,6 +3076,7 @@ bool NPC::Death(Mob* killer_mob, int64 damage, uint16 spell, EQ::skills::SkillTy
 		const auto& v = give_exp_client->GetRaidOrGroupOrSelf(true);
 		for (const auto& m : v) {
 			m->CastToClient()->RecordKilledNPCEvent(this);
+			m->CastToClient()->AchievementNPCKill(GetNPCTypeID(), GetCleanName());
 
 			if (parse->HasQuestSub(GetNPCTypeID(), EVENT_KILLED_MERIT)) {
 				parse->EventNPC(EVENT_KILLED_MERIT, this, m, "killed", 0);
@@ -3129,7 +3146,7 @@ bool NPC::Death(Mob* killer_mob, int64 damage, uint16 spell, EQ::skills::SkillTy
 	return true;
 }
 
-void Mob::AddToHateList(Mob* other, int64 hate /*= 0*/, int64 damage /*= 0*/, bool iYellForHelp /*= true*/, bool bFrenzy /*= false*/, bool iBuffTic /*= false*/, uint16 spell_id, bool pet_command)
+void Mob::AddToHateList(Mob* other, int64 hate /*= 0*/, int64 damage /*= 0*/, bool iYellForHelp /*= true*/, bool bFrenzy /*= false*/, bool iBuffTic /*= false*/, int32 spell_id, bool pet_command)
 {
 	if (!other)
 		return;
@@ -3390,7 +3407,7 @@ void Mob::DamageShield(Mob* attacker, bool spell_ds) {
 
 	int DS = 0;
 	int rev_ds = 0;
-	uint16 spellid = 0;
+	int32 spellid = 0;
 
 	if (!spell_ds)
 	{
@@ -3466,7 +3483,7 @@ void Mob::DamageShield(Mob* attacker, bool spell_ds) {
 	//Reverse DS
 	//this is basically a DS, but the spell is on the attacker, not the attackee
 	//if we've gotten to this point, we know we know "attacker" hit "this" (us) for damage & we aren't invulnerable
-	uint16 rev_ds_spell_id = SPELL_UNKNOWN;
+	int32 rev_ds_spell_id = SPELL_UNKNOWN;
 
 	if (IsValidSpell(spellbonuses.ReverseDamageShieldSpellID)) {
 		rev_ds_spell_id = spellbonuses.ReverseDamageShieldSpellID;
@@ -3772,7 +3789,7 @@ int64 Mob::ReduceDamage(int64 damage)
 	return(damage);
 }
 
-int64 Mob::AffectMagicalDamage(int64 damage, uint16 spell_id, const bool iBuffTic, Mob* attacker)
+int64 Mob::AffectMagicalDamage(int64 damage, int32 spell_id, const bool iBuffTic, Mob* attacker)
 {
 	if (damage <= 0)
 		return damage;
@@ -4138,7 +4155,7 @@ bool Mob::CheckDoubleAttack()
 	return zone->random.Int(1, 500) <= chance;
 }
 
-void Mob::CommonDamage(Mob* attacker, int64 &damage, const uint16 spell_id, const EQ::skills::SkillType skill_used, bool &avoidable, const int8 buffslot, const bool iBuffTic, eSpecialAttacks special) {
+void Mob::CommonDamage(Mob* attacker, int64 &damage, const int32 spell_id, const EQ::skills::SkillType skill_used, bool &avoidable, const int8 buffslot, const bool iBuffTic, eSpecialAttacks special) {
 #ifdef LUA_EQEMU
 	int64 lua_ret = 0;
 	bool ignore_default = false;
@@ -4901,7 +4918,7 @@ void Mob::CommonDamage(Mob* attacker, int64 &damage, const uint16 spell_id, cons
 	}
 }
 
-void Mob::HealDamage(uint64 amount, Mob* caster, uint16 spell_id)
+void Mob::HealDamage(uint64 amount, Mob* caster, int32 spell_id)
 {
 #ifdef LUA_EQEMU
 	uint64 lua_ret = 0;
@@ -4922,10 +4939,38 @@ void Mob::HealDamage(uint64 amount, Mob* caster, uint16 spell_id)
 		acthealed = amount;
 
 	if (acthealed > RuleI(Spells, HealAmountMessageFilterThreshold)) {
+		// TOB+ clients print the heal line and its floating number from the heal message
+		bool caster_has_message = false;
+		bool target_has_message = false;
+		if (caster && RuleB(Spells, ToBHealMessages)) {
+			const auto context        = caster->TakeHealMessageContext(GetID(), spell_id);
+			const int32 message_spell = IsValidSpell(spell_id) ? spell_id : context.spell_id;
+			const int32 wire_spell    = IsValidSpell(message_spell) ? message_spell : -1;
+			const bool over_time      = context.over_time || IsBuffSpell(spell_id);
+			const eqFilterType filter = over_time ? FilterHealOverTime : FilterSpellDamage;
+			const int64 healed        = static_cast<int64>(acthealed);
+			const int64 total         = static_cast<int64>(amount);
+
+			if (caster->IsClient()) {
+				caster_has_message = ClientPatch::SendHealMessage(caster->CastToClient(), caster, filter, GetID(),
+					caster->GetID(), wire_spell, healed, total, over_time, context.critical);
+			}
+
+			if (IsClient() && caster != this) {
+				target_has_message = ClientPatch::SendHealMessage(CastToClient(), caster, filter, GetID(),
+					caster->GetID(), wire_spell, healed, total, over_time, context.critical);
+			}
+
+			if (RuleI(Spells, ToBOtherHealMessageRange) > 0) {
+				ClientPatch::BroadcastHealMessage(this, caster, static_cast<float>(RuleI(Spells, ToBOtherHealMessageRange)),
+					wire_spell, healed, total, over_time, context.critical);
+			}
+		}
+
 		if (caster) {
 			if (IsBuffSpell(spell_id)) { // hots
 				// message to caster
-				if ((caster->IsClient() && caster == this)) {
+				if (!caster_has_message && caster->IsClient() && caster == this) {
 					if (caster->CastToClient()->ClientVersionBit() & EQ::versions::maskSoFAndLater) {
 						FilteredMessageString(caster, Chat::NonMelee, FilterHealOverTime,
 							HOT_HEAL_SELF, itoa(acthealed), spells[spell_id].name);
@@ -4934,7 +4979,7 @@ void Mob::HealDamage(uint64 amount, Mob* caster, uint16 spell_id)
 						FilteredMessageString(caster, Chat::NonMelee, FilterHealOverTime,
 							YOU_HEALED, GetCleanName(), itoa(acthealed));
 				}
-				else if ((caster->IsClient() && caster != this)) {
+				else if (!caster_has_message && caster->IsClient() && caster != this) {
 					if (caster->CastToClient()->ClientVersionBit() & EQ::versions::maskSoFAndLater)
 						caster->FilteredMessageString(caster, Chat::NonMelee, FilterHealOverTime,
 							HOT_HEAL_OTHER, GetCleanName(), itoa(acthealed),
@@ -4945,7 +4990,7 @@ void Mob::HealDamage(uint64 amount, Mob* caster, uint16 spell_id)
 				}
 
 				// message to target
-				if (IsClient() && caster != this) {
+				if (!target_has_message && IsClient() && caster != this) {
 					if (CastToClient()->ClientVersionBit() & EQ::versions::maskSoFAndLater)
 						FilteredMessageString(caster, Chat::NonMelee, FilterHealOverTime,
 							HOT_HEALED_OTHER, caster->GetCleanName(),
@@ -4957,14 +5002,14 @@ void Mob::HealDamage(uint64 amount, Mob* caster, uint16 spell_id)
 			}
 			else { // normal heals
 				// Message to caster
-				if (caster->IsClient()) {
+				if (!caster_has_message && caster->IsClient()) {
 					caster->FilteredMessageString(caster, Chat::NonMelee,
 						FilterSpellDamage, YOU_HEAL, GetCleanName(),
 						itoa(acthealed));
 					}
 
 				// Message to target
-				if (IsClient() && caster != this) {
+				if (!target_has_message && IsClient() && caster != this) {
 					FilteredMessageString(caster, Chat::NonMelee,
 					FilterSpellDamage, YOU_HEALED, caster->GetCleanName(),
 					itoa(acthealed));
@@ -5393,7 +5438,7 @@ void Mob::TrySpellProc(const EQ::ItemInstance *inst, const EQ::ItemData *weapon,
 	if (poison_slot > -1) {
 		bool one_shot = !RuleB(Combat, UseExtendedPoisonProcs);
 		float chance = (one_shot) ? 100.0f : ProcChance * (static_cast<float>(SpellProcs[poison_slot].chance) / 100.0f);
-		uint16 spell_id = SpellProcs[poison_slot].spellID;
+		int32 spell_id = SpellProcs[poison_slot].spellID;
 
 		if (zone->random.Roll(chance)) {
 			LogCombat("Poison proc [{}] procing spell [{}] ([{}] percent chance)", poison_slot, spell_id, chance);
@@ -6134,8 +6179,8 @@ void Mob::TrySkillProc(Mob *on, EQ::skills::SkillType skill, uint16 ReuseTime, b
 	*/
 	bool CanProc = true;
 
-	uint16 base_spell_id = 0;
-	uint16 proc_spell_id = 0;
+	int32 base_spell_id = 0;
+	int32 proc_spell_id = 0;
 	float ProcMod = 0;
 	float chance = 0;
 

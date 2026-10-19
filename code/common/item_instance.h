@@ -1,22 +1,20 @@
-/*	EQEMu: Everquest Server Emulator
+/*	EQEmu: EQEmulator
 
-	Copyright (C) 2001-2016 EQEMu Development Team (http://eqemulator.net)
+	Copyright (C) 2001-2026 EQEmu Development Team
 
 	This program is free software; you can redistribute it and/or modify
 	it under the terms of the GNU General Public License as published by
-	the Free Software Foundation; version 2 of the License.
+	the Free Software Foundation; either version 3 of the License, or
+	(at your option) any later version.
 
 	This program is distributed in the hope that it will be useful,
-	but WITHOUT ANY WARRANTY except by those people which sell it, which
-	are required to give you total support for your newly bought product;
-	without even the implied warranty of MERCHANTABILITY or FITNESS FOR
-	A PARTICULAR PURPOSE. See the GNU General Public License for more details.
+	but WITHOUT ANY WARRANTY; without even the implied warranty of
+	MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+	GNU General Public License for more details.
 
 	You should have received a copy of the GNU General Public License
-	along with this program; if not, write to the Free Software
-	Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  04111-1307  USA
+	along with this program. If not, see <http://www.gnu.org/licenses/>.
 */
-
 // @merth notes:
 // These classes could be optimized with database reads/writes by storing
 // a status flag indicating how object needs to interact with database
@@ -32,6 +30,7 @@
 #include "common/repositories/character_evolving_items_repository.h"
 #include "common/timer.h"
 
+#include <functional>
 #include <map>
 
 class ItemParse;			// Parses item packets
@@ -107,7 +106,7 @@ namespace EQ
 		bool IsAugmentable() const;
 		bool AvailableWearSlot(uint32 aug_wear_slots) const;
 		int8 AvailableAugmentSlot(int32 augment_type) const;
-		bool IsAugmentSlotAvailable(int32 augment_type, uint8 slot) const;
+		bool IsAugmentSlotAvailable(int32 augment_type, uint8 slot, bool allow_occupied = false) const;
 		inline int GetAugmentType() const { return m_item ? m_item->AugType : 0; }
 		inline uint32 GetAugmentRestriction() const { return m_item ? m_item->AugRestrict : 0; }
 
@@ -306,6 +305,10 @@ namespace EQ
 		std::vector<std::string> GetAugmentNames() const;
 		static void AddGUIDToMap(uint64 existing_serial_number);
 		static void ClearGUIDMap();
+		// serials from a database-wide counter: the allocator reserves [start, end) and returns false on failure
+		static void SetSerialBlockAllocator(std::function<bool(int32 &start, int32 &end)> allocator);
+		// true the first time a persisted serial (inventory guid) is claimed in this process
+		static bool ClaimPersistedSerial(int32 serial);
 
 		// evolving items stuff
 		CharacterEvolvingItemsRepository::CharacterEvolvingItems &GetEvolvingDetails() const { return m_evolving_details; }

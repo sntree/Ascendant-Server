@@ -67,7 +67,10 @@ function event_signal(e)
 			eq.set_timer("fail", 30 * 60 * 1000) -- 30 Minute Failure
 		end
 	elseif e.signal == 3 then -- Twin is dead
-		eq.set_timer("absorb_twin", 30 * 1000) -- 30s from twin death to enrage
+		-- Ascendant (solo-ability): live gave 30s; the twins are tethered in separate rooms, so a solo
+		-- player needs time to travel and kill the second one. Enrage still happens if they take too long.
+		eq.set_timer("absorb_twin", 10 * 60 * 1000) -- 10 min from twin death to enrage
+		eq.zone_emote(MT.Yellow, "Qukret the Furious senses Araxt the Enraged falling. Slay him within ten minutes, before the forces of fury and rage become one!");
 	end
 end
 

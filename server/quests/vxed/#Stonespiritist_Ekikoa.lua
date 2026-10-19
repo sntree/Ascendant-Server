@@ -10,13 +10,16 @@ local function update_flags(client, make_permanent)
   -- has a limit to prevent excessive dzadd flagging
   eq.debug(string.format("flagged count [%s]", flagged_count))
 
-  if flagged_count >= 7 or has_temp_vxed then
-    client:Message(MT.NPCQuestSay, "Ekikoa tells you, 'I'm afraid that I have already aided as many as I can, I do not have the strength to assist you further.'")
-  elseif make_permanent then
+  -- Ascendant (TLP-style access): finishing Vxed always grants the permanent flag and Kod'Taz access.
+  -- No sewers prerequisite, no temporary flags, no per-instance cap (the old else branch is unused).
+  make_permanent = true
+  if make_permanent then
     client:Message(MT.NPCQuestSay, "Ekikoa tells you, 'This stone behind me is a shard of an Attunement Obelisk.  With a unique and ancient magic, we can attune spirits to this farstone to allow travel.  When you touch it, the stone will be imprinted with your essence, because this is only a section of an obelisk, more must be done in order to have full use of these obelisks.  Now, when you touch this stone, you will be sent back to Udranda.  She will tell you what you must do next when you are ready.'")
     client:Message(MT.Yellow, "You feel at one with the Attunement Obelisk and feel the power of the earth moving through you.")
     eq.set_data(vxed_flag_key, "1")
     eq.set_global("god_tipt_access", "1", 5, "F")
+    eq.set_global("god_kodtaz_access", "1", 5, "F")
+    client:Message(MT.Yellow, "You have earned access to Kod'Taz, Broken Trial Grounds.")
     flagged_count = flagged_count + 1
   else
     client:Message(MT.NPCQuestSay, "Ekikoa tells you, 'I'm afraid I can do nothing to aid you.  You have not proven yourself to be a faithful friend of my people.  You must complete High Priest Diru's tasks before I can be permitted to grant you access to our sacred magic.'")
@@ -36,7 +39,7 @@ function event_say(e)
   local has_tipt_access = (qglobals.god_tipt_access and qglobals.god_tipt_access == "1") -- permanent vxed flag complete
 
   if e.message:findi("hail") and not has_tipt_access then
-    if has_vxed_access then -- sewers progression completed dialogue (untested with smith rondo flag)
+    if true then -- Ascendant: everyone gets the progression dialogue (was: has_vxed_access from sewers/rondo)
       e.other:Message(MT.NPCQuestSay, "Ekikoa tells you, 'Ah, help has come.  I was told to expect friendly creatures from a distant land and here you are.  You are as alien as the others, but I know you have done good deeds for Udranda to send you here.  Now, I will tell you what you came for.  Obviously, the way to the temples is blocked. However, I [" .. eq.say_link("tend") .. "] to something very special here to overcome that problem.'")
     else
       update_flags(e.other, has_vxed_access)

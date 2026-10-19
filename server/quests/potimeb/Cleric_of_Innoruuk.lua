@@ -1,8 +1,17 @@
+local charm_credit = require("potimeb_charm_credit");
+
 --Cleric_of_Innoruuk (223197)
 --Phase 5 (Inny Army)
 --potimeb
 
 function event_death_complete(e)
-	-- send a signal to the Innoruuk that I died
-	eq.signal(223000,1);
+	charm_credit.death(e, { {223000, 1} });
+end
+
+function event_charm_start(e)
+	charm_credit.charm_start(e, { {223000, 1} });
+end
+
+function event_charm_end(e)
+	charm_credit.charm_end(e);
 end

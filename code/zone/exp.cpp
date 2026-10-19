@@ -1,21 +1,20 @@
-/*	EQEMu: Everquest Server Emulator
-	Copyright (C) 2001-2003 EQEMu Development Team (http://eqemulator.net)
+/*	EQEmu: EQEmulator
+
+	Copyright (C) 2001-2026 EQEmu Development Team
 
 	This program is free software; you can redistribute it and/or modify
 	it under the terms of the GNU General Public License as published by
-	the Free Software Foundation; version 2 of the License.
+	the Free Software Foundation; either version 3 of the License, or
+	(at your option) any later version.
 
 	This program is distributed in the hope that it will be useful,
-	but WITHOUT ANY WARRANTY except by those people which sell it, which
-	are required to give you total support for your newly bought product;
-	without even the implied warranty of MERCHANTABILITY or FITNESS FOR
-	A PARTICULAR PURPOSE. See the GNU General Public License for more details.
+	but WITHOUT ANY WARRANTY; without even the implied warranty of
+	MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+	GNU General Public License for more details.
 
 	You should have received a copy of the GNU General Public License
-	along with this program; if not, write to the Free Software
-	Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
+	along with this program. If not, see <http://www.gnu.org/licenses/>.
 */
-
 #include "common/data_bucket.h"
 #include "common/data_verification.h"
 #include "common/events/player_event_logs.h"
@@ -654,7 +653,7 @@ void Client::SetEXP(ExpSource exp_source, uint64 set_exp, uint64 set_aaxp, bool 
 				} else if (zone->IsHotzone()) {
 					Message(Chat::Experience, "You gain party experience (with a bonus)!");
 				} else {
-					MessageString(Chat::Experience, GAIN_GROUPXP);
+					if (ClientVersion() >= EQ::versions::ClientVersion::TOB) { MessageString(Chat::Experience, GAIN_GROUPXP, ""); } else { MessageString(Chat::Experience, GAIN_GROUPXP); }
 				}
 			} else if (IsRaidGrouped()) {
 				if (RuleI(Character, ShowExpValues) > 0) {
@@ -662,7 +661,7 @@ void Client::SetEXP(ExpSource exp_source, uint64 set_exp, uint64 set_aaxp, bool 
 				} else if (zone->IsHotzone()) {
 					Message(Chat::Experience, "You gained raid experience (with a bonus)!");
 				} else {
-					MessageString(Chat::Experience, GAIN_RAIDEXP);
+					if (ClientVersion() >= EQ::versions::ClientVersion::TOB) { MessageString(Chat::Experience, GAIN_RAIDEXP, ""); } else { MessageString(Chat::Experience, GAIN_RAIDEXP); }
 				}
 			} else {
 				if (RuleI(Character, ShowExpValues) > 0) {
@@ -670,7 +669,7 @@ void Client::SetEXP(ExpSource exp_source, uint64 set_exp, uint64 set_aaxp, bool 
 				} else if (zone->IsHotzone()) {
 					Message(Chat::Experience, "You gain experience (with a bonus)!");
 				} else {
-					MessageString(Chat::Experience, GAIN_XP);
+					if (ClientVersion() >= EQ::versions::ClientVersion::TOB) { MessageString(Chat::Experience, GAIN_XP, ""); } else { MessageString(Chat::Experience, GAIN_XP); }
 				}
 			}
 		}
@@ -827,6 +826,10 @@ void Client::SetEXP(ExpSource exp_source, uint64 set_exp, uint64 set_aaxp, bool 
 
 		SetLevel(check_level);
 
+		if (level_increase && RuleB(Character, ToBLevelUpAppearance)) {
+			SendLevelAppearanceToToB();
+		}
+
 		if (RuleB(Bots, Enabled) && RuleB(Bots, BotLevelsWithOwner)) {
 			// hack way of doing this..but, least invasive... (same criteria as gain level for sendlvlapp)
 			Bot::LevelBotWithClient(this, GetLevel(), (myoldlevel == check_level - 1));
@@ -968,6 +971,7 @@ void Client::SetLevel(uint8 set_level, bool command)
 	QueuePacket(outapp);
 	safe_delete(outapp);
 	SendAppearancePacket(AppearanceType::WhoLevel, set_level); // who level change
+	AchievementEvent(Achievement::EventType::ReachLevel, 0, set_level);
 
 	LogInfo("Setting Level for [{}] to [{}]", GetName(), set_level);
 

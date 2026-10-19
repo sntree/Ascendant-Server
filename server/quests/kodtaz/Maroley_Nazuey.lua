@@ -72,12 +72,17 @@ function event_say(e)
       e.other:Message(MT.NPCQuestSay, "Maroley Nazuey says, 'I imagine you may think you're ready to enter this temple, but I can assure you that you are not. You must complete the first trial before you will be allowed entrance to this temple. Seek out Gazak Klelkek at the Temple of Singular Might for more information on the first trial.'")
     elseif not is_gm and eq.get_data(preflag_key) == "" then
       e.other:Message(MT.NPCQuestSay, "Maroley Nazuey says, 'What's that you say? You're ready to enter this temple? I don't remember speaking to you about [" .. eq.say_link("what's in store") .. "] for you here.'")
-    elseif not is_gm and e.other:GetGroupMemberCount() < 2 then -- live probably missing speak_mode say flag here
-      e.other:Message(MT.NPCQuestSay, "I'm sorry, but you don't have enough comrades with you to venture into this dangerous area. Come back when you have at least two friends to join you on this perilous journey.")
+    -- Ascendant: solo-friendly, no group required (live required a group of 2)
     elseif not is_gm and e.other:DoesAnyPartyMemberHaveLockout(expedition_name, "Replay Timer", 6) then
       e.other:Message(MT.NPCQuestSay, "Maroley Nazuey says, 'I'm afraid I cannot allow you to begin, someone in your party has been on this expedition too recently and cannot yet go again.'")
     else
       e.other:Message(MT.NPCQuestSay, ("Maroley Nazuey says, 'Good luck then, %s. Perhaps I will see you again soon and, by that time, I hope you have the artifact in your possession.'"):format(e.other:GetCleanName()))
+      -- Ascendant: a character can only be in one expedition (e.g. a Planeshifter Tyrael DZ)
+      local current_dz = e.other:GetExpedition()
+      if current_dz.valid then
+      	e.other:Message(MT.Yellow, "You are already in the expedition [" .. current_dz:GetName() .. "]. Leave it first (/dzquit), then ask again.")
+      	return
+      end
       local dz = e.other:CreateExpedition(expedition_info)
       if dz.valid then
         dz:AddReplayLockout(eq.seconds("1h"))

@@ -2,9 +2,24 @@
 # items: 16261, 16260
 
 my $wave;
+my $dreamkeeper_spawned;
+
+sub SpawnDreamkeeper {
+  return if $dreamkeeper_spawned;
+
+  my $dreamkeeper_id = quest::spawn2(204076, 0, 0, $x + 20, $y + 20, $z, $h); # NPC: #The_Dreamkeeper
+  my $dreamkeeper = $entity_list->GetMobID($dreamkeeper_id);
+  if ($dreamkeeper) {
+    $dreamkeeper->CastToNPC()->AddToHateList($npc, 1);
+  }
+
+  $dreamkeeper_spawned = 1;
+  $wave = 5;
+}
 
 sub EVENT_SPAWN {
   $wave = 0;
+  $dreamkeeper_spawned = 0;
   quest::say("Well, well! I was not sure if you would show. I hope you and your friends are strong enough to help me while I search for these new research components.");
   quest::emote("looks around. 'Looks like the way is safe. Let's go before we are noticed by the creatures of the night.'");
   quest::start(124);
@@ -91,12 +106,8 @@ sub EVENT_WAYPOINT_ARRIVE {
     quest::say("What a tiring evening. Perhaps we should rest here for a while?");
     $npc->SetAppearance(1);
   }
-  if (($wp == 26) && ($wave == 4)) {
-    $wave5_1 = quest::spawn2(204076,0,0,$x+20,$y+20,$z,$h); # NPC: #The_Dreamkeeper
-    $wave5_obj1 = $entity_list->GetMobID($wave5_1);
-    $wave5_npc1 = $wave5_obj1->CastToNPC();
-    $wave5_npc1->AddToHateList($npc,1);
-    $wave = 5;
+  if (($wp == 26) && ($wave >= 4)) {
+    SpawnDreamkeeper();
   }
   if ($wp == 27) {
     quest::say("We made it! No doubt I could not have made it without you. Did you find something useful during our trip? May I have it?");
@@ -107,6 +118,9 @@ sub EVENT_WAYPOINT_DEPART {
   if ($wp == 25) {
     quest::say("We should get moving.");
     $npc->SetAppearance(0);
+    if ($wave >= 4) {
+      SpawnDreamkeeper();
+    }
   }
   if ($wp == 27) {
     quest::say("I must leave this place now.");
@@ -115,7 +129,7 @@ sub EVENT_WAYPOINT_DEPART {
 }
 
 sub EVENT_ITEM {
-  if (($x == 1690) && ($y == 285) && ($wave == 5) && plugin::check_handin(\%itemcount, 16261 => 1)) {
+  if (($wave >= 5) && plugin::check_handin(\%itemcount, 16261 => 1)) {
     quest::say("Excellent work, $name. That is exactly why I came to this dreadful place. Thank you for your help. Here, take this. I must get back to the Plane of Knowledge. Come and see me when you get a chance.");
     quest::summonitem(16260); #Tiny Gold Fist
     quest::setglobal("AidEinoDone",1,5,"F");

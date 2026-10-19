@@ -57,7 +57,8 @@ function KeleSignal(e)
 
 	-- Banish Signal (Make sure running timer as Kele)
 	elseif e.signal == 200 then
-		eq.set_timer("banish", 30 * 1000)
+		-- Ascendant: banish removed (no banish / death touch policy)
+		-- eq.set_timer("banish", 30 * 1000)
 	elseif e.signal == 201 then
 		eq.stop_timer("banish")
 	end

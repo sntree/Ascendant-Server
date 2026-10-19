@@ -1,21 +1,20 @@
-/*	EQEMu: Everquest Server Emulator
-	Copyright (C) 2001-2016 EQEMu Development Team (http://eqemulator.net)
+/*	EQEmu: EQEmulator
+
+	Copyright (C) 2001-2026 EQEmu Development Team
 
 	This program is free software; you can redistribute it and/or modify
 	it under the terms of the GNU General Public License as published by
-	the Free Software Foundation; version 2 of the License.
+	the Free Software Foundation; either version 3 of the License, or
+	(at your option) any later version.
 
 	This program is distributed in the hope that it will be useful,
-	but WITHOUT ANY WARRANTY except by those people which sell it, which
-	are required to give you total support for your newly bought product;
-	without even the implied warranty of MERCHANTABILITY or FITNESS FOR
-	A PARTICULAR PURPOSE. See the GNU General Public License for more details.
+	but WITHOUT ANY WARRANTY; without even the implied warranty of
+	MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+	GNU General Public License for more details.
 
 	You should have received a copy of the GNU General Public License
-	along with this program; if not, write to the Free Software
-	Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
+	along with this program. If not, see <http://www.gnu.org/licenses/>.
 */
-
 #include "inventory_profile.h"
 
 #include "common/data_verification.h"
@@ -29,8 +28,34 @@
 int32 next_item_serial_number = 1;
 std::unordered_set<uint64> guids{};
 
+static std::function<bool(int32 &, int32 &)> serial_block_allocator;
+static int32                                serial_block_next = 0;
+static int32                                serial_block_end  = 0;
+static std::unordered_set<int32>            claimed_persisted_serials{};
+
 static inline int32 GetNextItemInstSerialNumber()
 {
+	// Zone and world reserve blocks from one database counter, so a serial is unique across processes and can be
+	// persisted (inventory guid) and reused on the next load. Without an allocator, fall back to the per-process
+	// counter below.
+	if (serial_block_allocator) {
+		if (serial_block_next >= serial_block_end) {
+			int32 start = 0;
+			int32 end   = 0;
+			if (serial_block_allocator(start, end) && start > 0 && end > start) {
+				serial_block_next = start;
+				serial_block_end  = end;
+			}
+			else {
+				serial_block_allocator = nullptr;
+			}
+		}
+
+		if (serial_block_allocator) {
+			return serial_block_next++;
+		}
+	}
+
 	// The Bazaar relies on each item a client has up for Trade having a unique
 	// identifier. This 'SerialNumber' is sent in Serialized item packets and
 	// is used in Bazaar packets to identify the item a player is buying or inspecting.
@@ -314,13 +339,14 @@ int8 EQ::ItemInstance::AvailableAugmentSlot(int32 augment_type) const
 	return INVALID_INDEX;
 }
 
-bool EQ::ItemInstance::IsAugmentSlotAvailable(int32 augment_type, uint8 slot) const
+bool EQ::ItemInstance::IsAugmentSlotAvailable(int32 augment_type, uint8 slot, bool allow_occupied) const
 {
-	if (!m_item || !m_item->IsClassCommon() || GetItem(slot)) {
+	if (!m_item || !m_item->IsClassCommon() || (!allow_occupied && GetItem(slot))) {
 		return false;
 	}
 
 	return (
+		slot < invaug::SOCKET_COUNT &&
 		(
 			augment_type == -1 ||
 			(
@@ -1937,6 +1963,18 @@ int EQ::ItemInstance::GetItemSkillsStat(EQ::skills::SkillType skill, bool augmen
 void EQ::ItemInstance::AddGUIDToMap(uint64 existing_serial_number)
 {
 	guids.emplace(existing_serial_number);
+}
+
+void EQ::ItemInstance::SetSerialBlockAllocator(std::function<bool(int32 &start, int32 &end)> allocator)
+{
+	serial_block_allocator = std::move(allocator);
+	serial_block_next      = 0;
+	serial_block_end       = 0;
+}
+
+bool EQ::ItemInstance::ClaimPersistedSerial(int32 serial)
+{
+	return serial > 0 && claimed_persisted_serials.insert(serial).second;
 }
 
 void EQ::ItemInstance::ClearGUIDMap()

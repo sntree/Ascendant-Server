@@ -1,11 +1,19 @@
 -- nro\Magus_Arindri.lua NPCID 34129
 
 function event_say(e)
+	-- Ascendant: Nedaria's Landing only once Legacy of Ykesha is live (GMs always see it)
+	local is_gm = (e.other:Admin() > 80 and e.other:GetGM());
+	local nedaria_open = eq.is_the_legacy_of_ykesha_enabled() or is_gm;
+	local nedaria_link = nedaria_open and ("[" .. eq.say_link("Nedaria's Landing",false,"Nedaria's Landing") .. "], ") or "";
+	local nedaria_offer = nedaria_open and ("  I have enough time to send you to [" .. eq.say_link("Nedaria's Landing") .. "], if you'd like.") or "";
+
 	--Adventurers Stone
 	if(e.other:KeyRingCheck(741000) or e.other:HasItem(741000)) then
 		if(e.message:findi("hail")) then
-			e.self:Say("You endured the burning heat of the desert to come and use our magic!  I'm so excited.  We have been getting a lot of customers.  We've only lost a few.  I sometimes wonder if Vayzl has incorrectly used the spell on purpose to see the odd traveler explode into a spray of magic.  I do respect her, but I just don't understand dark elves, I guess.  I am far too precise and careful to make any mistakes... Well, not a second time.  Tell me where you would like to go and I will send you there.  I can send you to any of the other camps in [" .. eq.say_link("Butcherblock",false,"Butcherblock") .. "], [" .. eq.say_link("Commonlands",false,"Commonlands") .. "], [" .. eq.say_link("Everfrost",false,"Everfrost") .. "], or [" .. eq.say_link("South Ro",false,"South Ro") .. "].");
+			e.self:Say("You endured the burning heat of the desert to come and use our magic!  I'm so excited.  We have been getting a lot of customers.  We've only lost a few.  I sometimes wonder if Vayzl has incorrectly used the spell on purpose to see the odd traveler explode into a spray of magic.  I do respect her, but I just don't understand dark elves, I guess.  I am far too precise and careful to make any mistakes... Well, not a second time.  Tell me where you would like to go and I will send you there.  I can send you to any of the other camps in [" .. eq.say_link("Butcherblock",false,"Butcherblock") .. "], [" .. eq.say_link("Commonlands",false,"Commonlands") .. "], [" .. eq.say_link("Everfrost",false,"Everfrost") .. "], " .. nedaria_link .. "or [" .. eq.say_link("South Ro",false,"South Ro") .. "].");
 		
+		elseif(e.message:findi("nedaria") and nedaria_open) then
+			e.self:CastSpell(4580,e.other:GetID(),0,1); -- Spell: Teleport: Nedaria
 		elseif(e.message:findi("everfrost")) then
 			e.self:CastSpell(4180,e.other:GetID(),0,1); -- Spell: Teleport: Everfrost
 		elseif(e.message:findi("butcherblock")) then
@@ -22,7 +30,9 @@ function event_say(e)
 		end
 	else --no Adventurers Stone
 		if(e.message:findi("hail")) then
-			e.self:Say("You will have to excuse me, I am quite busy studying this Farstone and the possibility of using the magic stored inside of it.  Perhaps you should talk to those at the Wayfarer camps to see if they have any use for you.");
+			e.self:Say("You will have to excuse me, I am quite busy studying this Farstone and the possibility of using the magic stored inside of it.  Perhaps you should talk to those at the Wayfarer camps to see if they have any use for you." .. nedaria_offer);
+		elseif(e.message:findi("nedaria") and nedaria_open) then
+			e.self:CastSpell(4580,e.other:GetID(),0,1); -- Spell: Teleport: Nedaria
 		end
 	end
 end

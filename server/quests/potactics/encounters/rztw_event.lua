@@ -366,7 +366,7 @@ function EventWin(e)
 end
 
 function PP_Spawn(e)
-	eq.set_timer("depop", 10 * 60 * 1000) -- 10 min depop
+	eq.set_timer("depop", 20 * 60 * 1000) -- 20 min depop
 	pp_counter = 0;
 end
 

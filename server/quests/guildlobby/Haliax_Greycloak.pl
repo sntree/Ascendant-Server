@@ -178,7 +178,7 @@ sub EVENT_ITEM {
 
     foreach my $item_id (keys %itemcount) {
         next unless $item_id && $item_id > 0;
-        if ($item_id >= 121620 && $item_id <= 121847) {
+        if ($item_id >= 121620 && $item_id <= 121848) {
             $found_tome = 1;
 
             my ($item_name, $illegible_tome_id) = $dbh->selectrow_array(

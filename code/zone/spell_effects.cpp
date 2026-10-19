@@ -1,21 +1,20 @@
-/*	EQEMu: Everquest Server Emulator
-	Copyright (C) 2001-2004 EQEMu Development Team (http://eqemu.org)
+/*	EQEmu: EQEmulator
+
+	Copyright (C) 2001-2026 EQEmu Development Team
 
 	This program is free software; you can redistribute it and/or modify
 	it under the terms of the GNU General Public License as published by
-	the Free Software Foundation; version 2 of the License.
+	the Free Software Foundation; either version 3 of the License, or
+	(at your option) any later version.
 
 	This program is distributed in the hope that it will be useful,
-	but WITHOUT ANY WARRANTY except by those people which sell it, which
-	are required to give you total support for your newly bought product;
-	without even the implied warranty of MERCHANTABILITY or FITNESS FOR
-	A PARTICULAR PURPOSE. See the GNU General Public License for more details.
+	but WITHOUT ANY WARRANTY; without even the implied warranty of
+	MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+	GNU General Public License for more details.
 
 	You should have received a copy of the GNU General Public License
-	along with this program; if not, write to the Free Software
-	Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
+	along with this program. If not, see <http://www.gnu.org/licenses/>.
 */
-
 #include "mob.h"
 
 #include "common/bodytypes.h"
@@ -33,6 +32,8 @@
 #include "zone/worldserver.h"
 
 #include <cmath>
+
+#include "client_version.h"
 
 
 extern Zone* zone;
@@ -62,7 +63,7 @@ bool IsNPCSpellGraceProtectedTarget(Mob *mob)
 
 // the spell can still fail here, if the buff can't stack
 // in this case false will be returned, true otherwise
-bool Mob::SpellEffect(Mob* caster, uint16 spell_id, float partial, int level_override, int reflect_effectiveness, int32 duration_override, bool disable_buff_overwrite)
+bool Mob::SpellEffect(Mob* caster, int32 spell_id, float partial, int level_override, int reflect_effectiveness, int32 duration_override, bool disable_buff_overwrite)
 {
 	int caster_level, buffslot, effect, effect_value, i;
 	EQ::ItemInstance *SummonedItem=nullptr;
@@ -184,11 +185,8 @@ bool Mob::SpellEffect(Mob* caster, uint16 spell_id, float partial, int level_ove
 		if (spells[spell_id].endurance_upkeep > 0)
 			SetEndurUpkeep(true);
 
-		if (IsClient() && CastToClient()->ClientVersionBit() & EQ::versions::maskUFAndLater)
-		{
-			EQApplicationPacket *outapp = MakeBuffsPacket(false);
-			CastToClient()->FastQueuePacket(&outapp);
-		}
+		// the hit count above is set after AddBuff already sent the buff, so resend its definition (TOB only)
+		ClientPatch::SendFullBuffRefresh(this, false, true, true);
 	}
 
 	if (IsClient()) {
@@ -865,9 +863,7 @@ bool Mob::SpellEffect(Mob* caster, uint16 spell_id, float partial, int level_ove
 
 				// This was done in AddBuff, but we were not a pet yet, so
 				// the target windows didn't get updated.
-				EQApplicationPacket *outapp = MakeBuffsPacket();
-				entity_list.QueueClientsByTarget(this, outapp, false, nullptr, true, false, EQ::versions::maskSoDAndLater);
-				safe_delete(outapp);
+				ClientPatch::SendFullBuffRefresh(this);
 
 				if(caster->IsClient()){
 					auto app = new EQApplicationPacket(OP_Charm, sizeof(Charm_Struct));
@@ -877,7 +873,7 @@ bool Mob::SpellEffect(Mob* caster, uint16 spell_id, float partial, int level_ove
 					ps->command = 1;
 					entity_list.QueueClients(this, app);
 					safe_delete(app);
-					SendPetBuffsToClient();
+					ClientPatch::SendFullBuffRefresh(this);
 					SendAppearancePacket(AppearanceType::Pet, caster->GetID(), true, true);
 				}
 
@@ -1684,7 +1680,7 @@ bool Mob::SpellEffect(Mob* caster, uint16 spell_id, float partial, int level_ove
 					GetPetType() != PetType::Charmed
 				)
 				{
-				uint16 pet_spellid =  CastToNPC()->GetPetSpellID();
+				int32 pet_spellid =  CastToNPC()->GetPetSpellID();
 				uint16 pet_ActSpellCost = caster->GetActSpellCost(pet_spellid, spells[pet_spellid].mana);
 				int16 ImprovedReclaimMod =	caster->spellbonuses.ImprovedReclaimEnergy +
 											caster->itembonuses.ImprovedReclaimEnergy +
@@ -3127,7 +3123,7 @@ bool Mob::SpellEffect(Mob* caster, uint16 spell_id, float partial, int level_ove
 					break;
 
 				if (caster && zone->random.Roll(spells[spell_id].base_value[i])) {
-					uint32 best_spell_id = caster->CastToClient()->GetHighestScribedSpellinSpellGroup(spells[spell_id].limit_value[i]);
+					int32 best_spell_id = caster->CastToClient()->GetHighestScribedSpellinSpellGroup(spells[spell_id].limit_value[i]);
 
 					if (IsValidSpell(best_spell_id))
 						caster->SpellFinished(best_spell_id, this, EQ::spells::CastingSlot::Item, 0, -1, spells[best_spell_id].resist_difficulty);
@@ -3544,7 +3540,7 @@ bool Mob::SpellEffect(Mob* caster, uint16 spell_id, float partial, int level_ove
 	return true;
 }
 
-int64 Mob::CalcSpellEffectValue(uint16 spell_id, int effect_id, int caster_level, uint32 instrument_mod, Mob *caster,
+int64 Mob::CalcSpellEffectValue(int32 spell_id, int effect_id, int caster_level, uint32 instrument_mod, Mob *caster,
 	int ticsremaining, uint16 caster_id)
 {
 	if (!IsValidSpell(spell_id) || effect_id < 0 || effect_id >= EFFECT_COUNT)
@@ -3613,7 +3609,7 @@ int64 Mob::CalcSpellEffectValue(uint16 spell_id, int effect_id, int caster_level
 }
 
 // generic formula calculations
-int64 Mob::CalcSpellEffectValue_formula(uint32 formula, int64 base_value, int64 max_value, int caster_level, uint16 spell_id, int ticsremaining)
+int64 Mob::CalcSpellEffectValue_formula(uint32 formula, int64 base_value, int64 max_value, int caster_level, int32 spell_id, int ticsremaining)
 {
 #ifdef LUA_EQEMU
 	int64 lua_ret = 0;
@@ -3971,19 +3967,15 @@ void Mob::BuffProcess()
 				}
 			}
 
-			if(IsClient())
-			{
-				if(buffs[buffs_i].UpdateClient == true)
-				{
-					CastToClient()->SendBuffDurationPacket(buffs[buffs_i], buffs_i);
-					// Hack to get UF to play nicer, RoF seems fine without it
-					if (CastToClient()->ClientVersion() == EQ::versions::ClientVersion::UF && buffs[buffs_i].hit_number > 0)
-						CastToClient()->SendBuffNumHitPacket(buffs[buffs_i], buffs_i);
-					buffs[buffs_i].UpdateClient = false;
-				}
+			// this is for older clients. Newer clients will simply discard this packet
+			if (IsClient() && buffs[buffs_i].UpdateClient == true) {
+				ClientPatch::SendSingleBuffChange(this, buffs[buffs_i], buffs_i);
+				buffs[buffs_i].UpdateClient = false;
 			}
 		}
 	}
+
+	ClientPatch::SendFullBuffRefresh(this);
 }
 
 void Mob::DoBuffTic(const Buffs_Struct &buff, int slot, Mob *caster)
@@ -4354,9 +4346,6 @@ void Mob::BuffFadeBySlot(int slot, bool iRecalcBonuses)
 	if(!IsValidSpell(buffs[slot].spellid))
 		return;
 
-	if (IsClient() && !CastToClient()->IsDead())
-		CastToClient()->MakeBuffFadePacket(buffs[slot].spellid, slot);
-
 	LogSpells("Fading buff [{}] from slot [{}]", buffs[slot].spellid, slot);
 
 	const auto has_fade_event = parse->SpellHasQuestSub(buffs[slot].spellid, EVENT_SPELL_FADE);
@@ -4529,13 +4518,11 @@ void Mob::BuffFadeBySlot(int slot, bool iRecalcBonuses)
 					owner->SetPet(0);
 				}
 
-				// Any client that has a previous charmed pet targetted shouldo
+				// Any client that has a previous charmed pet targeted should
 				// no longer see the buffs on the old pet.
 				// QueueClientsByTarget preserves GM and leadership cases.
 
-				EQApplicationPacket *outapp = MakeBuffsPacket(true, true);
-
-				entity_list.QueueClientsByTarget(this, outapp, false, nullptr, true, false, EQ::versions::maskSoDAndLater, true, true);
+				ClientPatch::SendFullBuffRefresh(this, true);
 
 				if (IsAIControlled())
 				{
@@ -4758,36 +4745,13 @@ void Mob::BuffFadeBySlot(int slot, bool iRecalcBonuses)
 	if (spells[buffs[slot].spellid].nimbus_effect > 0)
 		RemoveNimbusEffect(spells[buffs[slot].spellid].nimbus_effect);
 
+	// the client expects remaining duration to be 0 in the single packet change
+	buffs[slot].ticsremaining = 0;
+	ClientPatch::SendSingleBuffChange(this, buffs[slot], slot, true);
+
+	// don't set the spell to unknown until after the server has sent the single remove packets
 	buffs[slot].spellid = SPELL_UNKNOWN;
-	if(IsPet() && GetOwner() && GetOwner()->IsClient()) {
-		SendPetBuffsToClient();
-	}
-	if((IsClient() && !CastToClient()->GetPVP()) ||
-		(IsPet() && GetOwner() && GetOwner()->IsClient() && !GetOwner()->CastToClient()->GetPVP()) ||
-		(IsBot() && GetOwner() && GetOwner()->IsClient() && !GetOwner()->CastToClient()->GetPVP()) ||
-		(IsMerc() && GetOwner() && GetOwner()->IsClient() && !GetOwner()->CastToClient()->GetPVP()))
-	{
-		EQApplicationPacket *outapp = MakeBuffsPacket();
-
-		entity_list.QueueClientsByTarget(this, outapp, false, nullptr, true, false, EQ::versions::maskSoDAndLater);
-		if(IsClient() && GetTarget() == this) {
-			CastToClient()->QueuePacket(outapp);
-		}
-
-		safe_delete(outapp);
-	}
-
-	if (IsNPC()) {
-		EQApplicationPacket *outapp = MakeBuffsPacket();
-		entity_list.QueueClientsByTarget(this, outapp, false, nullptr, true, false, EQ::versions::maskSoDAndLater, true);
-		safe_delete(outapp);
-	}
-
-	if (IsClient() && CastToClient()->ClientVersionBit() & EQ::versions::maskUFAndLater)
-	{
-		EQApplicationPacket *outapp = MakeBuffsPacket(false);
-		CastToClient()->FastQueuePacket(&outapp);
-	}
+	ClientPatch::SendFullBuffRefresh(this);
 
 	// we will eventually call CalcBonuses() even if we skip it right here, so should correct itself if we still have them
 	degenerating_effects = false;
@@ -4795,7 +4759,7 @@ void Mob::BuffFadeBySlot(int slot, bool iRecalcBonuses)
 		CalcBonuses();
 }
 
-int64 Mob::CalcAAFocus(focusType type, const AA::Rank &rank, uint16 spell_id)
+int64 Mob::CalcAAFocus(focusType type, const AA::Rank &rank, int32 spell_id)
 {
 	const SPDat_Spell_Struct &spell = spells[spell_id];
 
@@ -5548,7 +5512,7 @@ int64 Mob::CalcAAFocus(focusType type, const AA::Rank &rank, uint16 spell_id)
 
 //given an item/spell's focus ID and the spell being cast, determine the focus ammount, if any
 //assumes that spell_id is not a bard spell and that both ids are valid spell ids
-int64 Mob::CalcFocusEffect(focusType type, uint16 focus_id, uint16 spell_id, bool best_focus, uint16 casterid, Mob *caster)
+int64 Mob::CalcFocusEffect(focusType type, uint16 focus_id, int32 spell_id, bool best_focus, uint16 casterid, Mob *caster)
 {
 	/*
 	'this' is always the caster of the spell_id, most foci check for effects on the caster, however some check for effects on the target.
@@ -5570,7 +5534,7 @@ int64 Mob::CalcFocusEffect(focusType type, uint16 focus_id, uint16 spell_id, boo
 	int    lvlModifier     = 100;
 	int    spell_level     = 0;
 	int    lvldiff         = 0;
-	uint32 Caston_spell_id = 0;
+	int32 Caston_spell_id = 0;
 	int    index_id        = -1;
 	uint32 focus_reuse_time = 0; //If this is set and all limits pass, start timer at end of script.
 
@@ -6364,7 +6328,7 @@ int64 Mob::CalcFocusEffect(focusType type, uint16 focus_id, uint16 spell_id, boo
 	return (value * lvlModifier / 100);
 }
 
-void Mob::TryTriggerOnCastFocusEffect(focusType type, uint16 spell_id)
+void Mob::TryTriggerOnCastFocusEffect(focusType type, int32 spell_id)
 {
 	if (IsBardSong(spell_id)) {
 		return;
@@ -6465,7 +6429,7 @@ void Mob::TryTriggerOnCastFocusEffect(focusType type, uint16 spell_id)
 	}
 }
 
-bool Mob::TryTriggerOnCastProc(uint16 focusspellid, uint16 spell_id, uint16 proc_spellid)
+bool Mob::TryTriggerOnCastProc(int32 focusspellid, int32 spell_id, int32 proc_spellid)
 {
 	// We confirm spell_id and focuspellid are valid before passing into this.
 	if (IsValidSpell(proc_spellid) && spell_id != focusspellid && spell_id != proc_spellid) {
@@ -6483,12 +6447,12 @@ bool Mob::TryTriggerOnCastProc(uint16 focusspellid, uint16 spell_id, uint16 proc
 	return false;
 }
 
-uint16 Mob::GetSympatheticFocusEffect(focusType type, uint16 spell_id) {
+int32 Mob::GetSympatheticFocusEffect(focusType type, int32 spell_id) {
 
 	if (IsBardSong(spell_id))
 		return 0;
 
-	uint16 proc_spellid = 0;
+	int32 proc_spellid = 0;
 	float ProcChance = 0.0f;
 
 	std::vector<int> SympatheticProcList;
@@ -6542,7 +6506,7 @@ uint16 Mob::GetSympatheticFocusEffect(focusType type, uint16 spell_id) {
 
 	//Spell Focus
 	if (spellbonuses.FocusEffects[type]){
-		uint16 focusspellid = 0;
+		int32 focusspellid = 0;
 		int buff_max = GetMaxTotalSlots();
 		for (int buff_slot = 0; buff_slot < buff_max; buff_slot++) {
 
@@ -6606,7 +6570,7 @@ uint16 Mob::GetSympatheticFocusEffect(focusType type, uint16 spell_id) {
 	return 0;
 }
 
-int64 Mob::GetFocusEffect(focusType type, uint16 spell_id, Mob *caster, bool from_buff_tic)
+int64 Mob::GetFocusEffect(focusType type, int32 spell_id, Mob *caster, bool from_buff_tic)
 {
 	if (IsBardSong(spell_id) &&
 		type != focusFcBaseEffects &&
@@ -6992,7 +6956,7 @@ int64 Mob::GetFocusEffect(focusType type, uint16 spell_id, Mob *caster, bool fro
 	return realTotal + realTotal2 + realTotal3 + worneffect_bonus;
 }
 
-int64 NPC::GetFocusEffect(focusType type, uint16 spell_id, Mob* caster, bool from_buff_tic) {
+int64 NPC::GetFocusEffect(focusType type, int32 spell_id, Mob* caster, bool from_buff_tic) {
 
 	int64 realTotal = 0;
 	int64 realTotal2 = 0;
@@ -7115,7 +7079,7 @@ int64 NPC::GetFocusEffect(focusType type, uint16 spell_id, Mob* caster, bool fro
 	return realTotal + realTotal2;
 }
 
-void Mob::CheckNumHitsRemaining(NumHit type, int32 buff_slot, uint16 spell_id)
+void Mob::CheckNumHitsRemaining(NumHit type, int32 buff_slot, int32 spell_id)
 {
 	/*
 	Field 175 = numhits type
@@ -7157,7 +7121,7 @@ void Mob::CheckNumHitsRemaining(NumHit type, int32 buff_slot, uint16 spell_id)
 					if (!TryFadeEffect(d))
 						BuffFadeBySlot(d, true);
 				} else if (IsClient()) { // still have numhits and client, update
-					CastToClient()->SendBuffNumHitPacket(buffs[d], d);
+					ClientPatch::SendSingleBuffChange(this, buffs[d], d);
 				}
 			}
 		}
@@ -7172,7 +7136,7 @@ void Mob::CheckNumHitsRemaining(NumHit type, int32 buff_slot, uint16 spell_id)
 				if (!TryFadeEffect(buff_slot))
 					BuffFadeBySlot(buff_slot , true);
 			} else if (IsClient()) { // still have numhits and client, update
-				CastToClient()->SendBuffNumHitPacket(buffs[buff_slot], buff_slot);
+				ClientPatch::SendSingleBuffChange(this, buffs[buff_slot], buff_slot);
 			}
 		}
 	}
@@ -7190,7 +7154,7 @@ void Mob::CheckNumHitsRemaining(NumHit type, int32 buff_slot, uint16 spell_id)
 					if (!TryFadeEffect(d))
 						BuffFadeBySlot(d, true);
 				} else if (IsClient()) { // still have numhits and client, update
-					CastToClient()->SendBuffNumHitPacket(buffs[d], d);
+					ClientPatch::SendSingleBuffChange(this, buffs[d], d);
 				}
 			}
 		}
@@ -7218,7 +7182,7 @@ void Mob::CheckNumHitsRemaining(NumHit type, int32 buff_slot, uint16 spell_id)
 }
 
 //for some stupid reason SK procs return theirs one base off...
-uint16 Mob::GetProcID(uint16 spell_id, uint8 effect_index)
+int32 Mob::GetProcID(int32 spell_id, uint8 effect_index)
 {
 	if (!RuleB(Spells, SHDProcIDOffByOne)) // UF+ spell files
 		return spells[spell_id].base_value[effect_index];
@@ -7410,7 +7374,7 @@ bool Mob::AffectedBySpellExcludingSlot(int slot, int effect)
 	return false;
 }
 
-float Mob::GetSympatheticProcChances(uint16 spell_id, int16 ProcRateMod, int32 ItemProcRate) {
+float Mob::GetSympatheticProcChances(int32 spell_id, int16 ProcRateMod, int32 ItemProcRate) {
 
 	float ProcChance = 0.0f;
 	int32 total_cast_time = 0;
@@ -7436,7 +7400,7 @@ float Mob::GetSympatheticProcChances(uint16 spell_id, int16 ProcRateMod, int32 I
  	return ProcChance;
  }
 
-int16 Mob::GetSympatheticSpellProcRate(uint16 spell_id)
+int16 Mob::GetSympatheticSpellProcRate(int32 spell_id)
 {
 	for (int i = 0; i < EFFECT_COUNT; i++){
 		if (spells[spell_id].effect_id[i] == SpellEffect::SympatheticProc)
@@ -7446,7 +7410,7 @@ int16 Mob::GetSympatheticSpellProcRate(uint16 spell_id)
 	return 0;
 }
 
-uint16 Mob::GetSympatheticSpellProcID(uint16 spell_id)
+int32 Mob::GetSympatheticSpellProcID(int32 spell_id)
 {
 	for (int i = 0; i < EFFECT_COUNT; i++){
 		if (spells[spell_id].effect_id[i] == SpellEffect::SympatheticProc)
@@ -7479,7 +7443,7 @@ int64 Mob::GetFcDamageAmtIncoming(Mob *caster, int32 spell_id, bool from_buff_ti
 	return dmg;
 }
 
-int64 Mob::GetFocusIncoming(focusType type, int effect, Mob *caster, uint32 spell_id) {
+int64 Mob::GetFocusIncoming(focusType type, int effect, Mob *caster, int32 spell_id) {
 
 	//**** This can be removed when bot healing focus code is updated ****
 
@@ -7551,7 +7515,7 @@ bool Mob::PassLimitClass(uint32 Classes_, uint16 Class_)
 	return false;
 }
 
-void Mob::DispelMagic(Mob* caster, uint16 spell_id, int effect_value)
+void Mob::DispelMagic(Mob* caster, int32 spell_id, int effect_value)
 {
 	int attempts = 0;
 	int max_attempts = RuleI(Ascendant, DispelMaxSlotAttempts);
@@ -7580,7 +7544,7 @@ void Mob::DispelMagic(Mob* caster, uint16 spell_id, int effect_value)
 	}
 }
 
-bool Mob::TrySpellEffectResist(uint16 spell_id)
+bool Mob::TrySpellEffectResist(int32 spell_id)
 {
 	/*
 		SEResist variable
@@ -9737,7 +9701,7 @@ void Mob::SendCastRestrictionMessage(int requirement_id, bool target_requirement
 	}
 }
 
-bool Mob::TrySpellProjectile(Mob* spell_target, uint16 spell_id, float speed) {
+bool Mob::TrySpellProjectile(Mob* spell_target, int32 spell_id, float speed) {
 
 	/*For mage 'Bolt' line and other various spells.
 	-This is mostly accurate for how the modern clients handle this effect.
@@ -9845,7 +9809,7 @@ bool Mob::TrySpellProjectile(Mob* spell_target, uint16 spell_id, float speed) {
 	return true;
 }
 
-void Mob::ResourceTap(int64 damage, uint16 spellid)
+void Mob::ResourceTap(int64 damage, int32 spellid)
 {
 	//'this' = caster
 	if (!IsValidSpell(spellid))
@@ -9897,7 +9861,7 @@ void Mob::TryTriggerThreshHold(int64 damage, int effect_id,  Mob* attacker){
 
 				if (spells[buffs[slot].spellid].effect_id[i] == effect_id){
 
-					uint16 spell_id = spells[buffs[slot].spellid].base_value[i];
+					int32 spell_id = spells[buffs[slot].spellid].base_value[i];
 
 					if (damage > spells[buffs[slot].spellid].limit_value[i]){
 
@@ -9965,7 +9929,7 @@ void Mob::CastSpellOnLand(Mob* caster, int32 spell_id)
 	}
 }
 
-void Mob::CalcSpellPowerDistanceMod(uint16 spell_id, float range, Mob* caster)
+void Mob::CalcSpellPowerDistanceMod(int32 spell_id, float range, Mob* caster)
 {
 	if (IsDistanceModifierSpell(spell_id)){
 
@@ -10220,7 +10184,7 @@ int Mob::GetFocusRandomEffectivenessValue(int focus_base, int focus_base2, bool 
 	return zone->random.Int(focus_base, focus_base2);
 }
 
-bool Mob::NegateSpellEffect(uint16 spell_id, int effect_id)
+bool Mob::NegateSpellEffect(int32 spell_id, int effect_id)
 {
 	/*
 		This works for most effects, anything handled purely by the client will bypass this (ie Gate, Shadowstep)
@@ -10691,10 +10655,10 @@ void Mob::ApplySpellEffectIllusion(int32 spell_id, Mob *caster, int buffslot, in
 				RuleB(Spells, IllusionsAlwaysPersist)
 			)
 		) {
-			buffs[buffslot].persistant_buff = 1;
+			buffs[buffslot].persistent_buff = 1;
 		}
 		else {
-			buffs[buffslot].persistant_buff = 0;
+			buffs[buffslot].persistent_buff = 0;
 		}
 	}
 }
@@ -10813,6 +10777,7 @@ int Mob::GetBuffStatValueBySlot(uint8 slot, const char* stat_identifier)
 	else if (id == "spell_id") { return buffs[slot].spellid; }
 	else if (id == "caster_id") { return buffs[slot].spellid; }
 	else if (id == "ticsremaining") { return buffs[slot].ticsremaining; }
+	else if (id == "initialduration") { return buffs[slot].initialduration; }
 	else if (id == "counters") { return buffs[slot].counters; }
 	else if (id == "hit_number") { return  buffs[slot].hit_number; }
 	else if (id == "melee_rune") { return  buffs[slot].melee_rune; }
@@ -10822,7 +10787,7 @@ int Mob::GetBuffStatValueBySlot(uint8 slot, const char* stat_identifier)
 	else if (id == "caston_y") { return buffs[slot].caston_y; }
 	else if (id == "caston_z") { return  buffs[slot].caston_z; }
 	else if (id == "instrument_mod") { return  buffs[slot].instrument_mod; }
-	else if (id == "persistant_buff") { return  buffs[slot].persistant_buff; }
+	else if (id == "persistant_buff") { return  buffs[slot].persistent_buff; }
 	else if (id == "client") { return  buffs[slot].client; }
 	else if (id == "extra_di_chance") { return  buffs[slot].ExtraDIChance; }
 	else if (id == "root_break_chance") { return  buffs[slot].RootBreakChance; }

@@ -1,3 +1,5 @@
+local charm_credit = require("potimeb_charm_credit");
+
 --#Shadow_of_Kazrok (223244)
 --Phase 1 - Kazrok of Fire Trial
 --potimeb
@@ -9,8 +11,15 @@ local min_y = 540;
 local max_y = 610;
 
 function event_death_complete(e)
-	-- send a signal to the #fire_trigger that I died
-	eq.signal(223173,2);
+	charm_credit.death(e, { {223173, 2} });
+end
+
+function event_charm_start(e)
+	charm_credit.charm_start(e, { {223173, 2} });
+end
+
+function event_charm_end(e)
+	charm_credit.charm_end(e);
 end
 
 function event_spawn(e)

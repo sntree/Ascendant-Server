@@ -65,11 +65,11 @@ function ACMSpawn(e)
     if entity_list:IsMobSpawnedByNpcTypeID(297191) then
         ShieldingEnable(e.self)
     end
-    eq.spawn_condition("txevu", 0, 3, 1) -- bearers and Mastruqs
+    eq.spawn_condition("txevu", eq.get_zone_instance_id(), 3, 1) -- bearers and Mastruqs
 end
 
 function ACMDeath(e)
-    eq.spawn_condition("txevu", 0, 3, 0) -- bearers and Mastruqs
+    eq.spawn_condition("txevu", eq.get_zone_instance_id(), 3, 0) -- bearers and Mastruqs
     ae = false
     adds = false
     combat = false

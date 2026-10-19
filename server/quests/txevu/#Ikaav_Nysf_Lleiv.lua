@@ -3,7 +3,7 @@
 local add_timer = 30000;
 
 function event_spawn(e)
-	eq.spawn_condition("txevu",0,4,1)
+	eq.spawn_condition("txevu", eq.get_zone_instance_id(),4,1)
 	eq.set_next_hp_event(75)
 end
 
@@ -105,5 +105,5 @@ function event_hp(e)
 end
 
 function event_death_complete(e)
-	eq.spawn_condition("txevu",0,4,0)
+	eq.spawn_condition("txevu", eq.get_zone_instance_id(),4,0)
 end

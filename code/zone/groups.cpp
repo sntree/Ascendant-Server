@@ -1,21 +1,20 @@
-/*	EQEMu: Everquest Server Emulator
-	Copyright (C) 2001-2016 EQEMu Development Team (http://eqemu.org)
+/*	EQEmu: EQEmulator
+
+	Copyright (C) 2001-2026 EQEmu Development Team
 
 	This program is free software; you can redistribute it and/or modify
 	it under the terms of the GNU General Public License as published by
-	the Free Software Foundation; version 2 of the License.
+	the Free Software Foundation; either version 3 of the License, or
+	(at your option) any later version.
 
 	This program is distributed in the hope that it will be useful,
-	but WITHOUT ANY WARRANTY except by those people which sell it, which
-	are required to give you total support for your newly bought product;
-	without even the implied warranty of MERCHANTABILITY or FITNESS FOR
-	A PARTICULAR PURPOSE. See the GNU General Public License for more details.
+	but WITHOUT ANY WARRANTY; without even the implied warranty of
+	MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+	GNU General Public License for more details.
 
 	You should have received a copy of the GNU General Public License
-	along with this program; if not, write to the Free Software
-	Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
+	along with this program. If not, see <http://www.gnu.org/licenses/>.
 */
-
 #include "groups.h"
 
 #include "common/eqemu_logsys.h"
@@ -241,6 +240,7 @@ bool Group::AddMember(Mob* new_member, std::string new_member_name, uint32 chara
 		new_member_name = new_member->GetCleanName();
 
 		if (new_member->IsClient()) {
+			new_member->CastToClient()->ClearSoloNPCMarks(true);
 			character_id = new_member->CastToClient()->CharacterID();
 		}
 
@@ -362,6 +362,8 @@ bool Group::AddMember(Mob* new_member, std::string new_member_name, uint32 chara
 	if (RuleB(Bots, Enabled)) {
 		Bot::UpdateGroupCastingRoles(this);
 	}
+
+	AnnounceAdvancedLootMasterLooter(); // rebuilds the master looter's Give-to list
 
 	return true;
 }
@@ -630,7 +632,7 @@ bool Group::DelMemberOOZ(const char *Name) {
 
 				memset(membername[i], 0, 64);
 				MemberRoles[i] = 0;
-				if(GroupCount() < 3)
+				if(GroupCount() < RuleI(Character, LeadershipMinGroupSize))
 				{
 					UnDelegateMarkNPC(NPCMarkerName.c_str());
 					if (GetLeader() && GetLeader()->IsClient() && GetLeader()->CastToClient()->ClientVersion() < EQ::versions::ClientVersion::SoD) {
@@ -795,7 +797,7 @@ bool Group::DelMember(Mob* oldmember, bool ignoresender)
 		oldmember->CastToClient()->LeaveGroupXTargets(this);
 	}
 
-	if(GroupCount() < 3)
+	if(GroupCount() < RuleI(Character, LeadershipMinGroupSize))
 	{
 		UnDelegateMarkNPC(NPCMarkerName.c_str());
 		if (GetLeader() && GetLeader()->IsClient() && GetLeader()->CastToClient()->ClientVersion() < EQ::versions::ClientVersion::SoD) {
@@ -811,7 +813,7 @@ bool Group::DelMember(Mob* oldmember, bool ignoresender)
 	return true;
 }
 
-void Group::CastGroupSpell(Mob* caster, uint16 spell_id) {
+void Group::CastGroupSpell(Mob* caster, int32 spell_id) {
 	uint32 z;
 	float range, distance;
 
@@ -1060,6 +1062,7 @@ void Group::SendUpdate(uint32 type, Mob* member)
 	auto outapp = new EQApplicationPacket(OP_GroupUpdate, sizeof(GroupUpdate2_Struct));
 	GroupUpdate2_Struct* gu = (GroupUpdate2_Struct*)outapp->pBuffer;
 	gu->action = type;
+	gu->group_id = GetID();
 	strcpy(gu->yourname,member->GetName());
 
 	int x = 0;
@@ -2078,6 +2081,19 @@ void Group::DelegateMarkNPC(const char *NewNPCMarkerName)
 		LogError("Unable to set group mark npc: [{}]\n", results.ErrorMessage().c_str());
 }
 
+// TOB+ has no OP_DelegateAbility; the group NPC marker is group role 4
+static void SendMarkNPCRole(Client *c, const char *member_name, const std::string &leader_name, uint8 toggle)
+{
+	auto outapp = new EQApplicationPacket(OP_GroupRoles, sizeof(GroupRole_Struct));
+	auto grs = (GroupRole_Struct *) outapp->pBuffer;
+	strn0cpy(grs->Name1, member_name, sizeof(grs->Name1));
+	strn0cpy(grs->Name2, leader_name.c_str(), sizeof(grs->Name2));
+	grs->RoleNumber = 4;
+	grs->Toggle = toggle;
+	c->QueuePacket(outapp);
+	safe_delete(outapp);
+}
+
 void Group::NotifyMarkNPC(Client *c)
 {
 	// Notify the specified client who the group member is who has been delgated the Mark NPC ability.
@@ -2087,6 +2103,11 @@ void Group::NotifyMarkNPC(Client *c)
 
 	if(!NPCMarkerName.size())
 		return;
+
+	if (c->ClientVersion() >= EQ::versions::ClientVersion::TOB) {
+		SendMarkNPCRole(c, NPCMarkerName.c_str(), GetLeaderName(), 1);
+		return;
+	}
 
 	auto outapp = new EQApplicationPacket(OP_DelegateAbility, sizeof(DelegateAbility_Struct));
 
@@ -2145,8 +2166,13 @@ void Group::UnDelegateMarkNPC(const char *OldNPCMarkerName)
 	strn0cpy(das->Name, OldNPCMarkerName, sizeof(das->Name));
 
 	for(uint32 i = 0; i < MAX_GROUP_MEMBERS; ++i)
-		if(members[i] && members[i]->IsClient())
-			members[i]->CastToClient()->QueuePacket(outapp);
+		if(members[i] && members[i]->IsClient()) {
+			Client *c = members[i]->CastToClient();
+			if (c->ClientVersion() >= EQ::versions::ClientVersion::TOB)
+				SendMarkNPCRole(c, OldNPCMarkerName, GetLeaderName(), 0);
+			else
+				c->QueuePacket(outapp);
+		}
 
 	safe_delete(outapp);
 
@@ -2370,6 +2396,35 @@ void Group::ChangeLeader(Mob* newleader)
 		}
 	}
 	safe_delete(outapp);
+
+	AnnounceAdvancedLootMasterLooter();
+}
+
+// TOB+ Advanced Loot: the member given the Master Looter role in the group window, else the leader
+Client *Group::GetAdvancedLootMasterLooter()
+{
+	if (!m_advloot_master_looter.empty()) {
+		for (Mob *m : members) {
+			if (m && m->IsClient() && Strings::EqualFold(m->GetCleanName(), m_advloot_master_looter)) {
+				return m->CastToClient();
+			}
+		}
+	}
+
+	return leader && leader->IsClient() ? leader->CastToClient() : nullptr;
+}
+
+void Group::AnnounceAdvancedLootMasterLooter()
+{
+	if (!GetAdvancedLootMasterLooter()) {
+		return;
+	}
+
+	for (Mob *m : members) {
+		if (m && m->IsClient() && m->CastToClient()->ClientVersion() >= EQ::versions::ClientVersion::TOB) {
+			m->CastToClient()->QueueAdvancedLootMasterLooterRefresh();
+		}
+	}
 }
 
 const char *Group::GetClientNameByIndex(uint8 index)

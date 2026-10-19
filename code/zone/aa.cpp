@@ -1,21 +1,20 @@
-/*	EQEMu: Everquest Server Emulator
-Copyright (C) 2001-2016 EQEMu Development Team (http://eqemulator.net)
+/*	EQEmu: EQEmulator
+
+	Copyright (C) 2001-2026 EQEmu Development Team
 
 	This program is free software; you can redistribute it and/or modify
 	it under the terms of the GNU General Public License as published by
-	the Free Software Foundation; version 2 of the License.
+	the Free Software Foundation; either version 3 of the License, or
+	(at your option) any later version.
 
 	This program is distributed in the hope that it will be useful,
-	but WITHOUT ANY WARRANTY except by those people which sell it, which
-	are required to give you total support for your newly bought product;
-	without even the implied warranty of MERCHANTABILITY or FITNESS FOR
-	A PARTICULAR PURPOSE. See the GNU General Public License for more details.
+	but WITHOUT ANY WARRANTY; without even the implied warranty of
+	MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+	GNU General Public License for more details.
 
 	You should have received a copy of the GNU General Public License
-	along with this program; if not, write to the Free Software
-	Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
+	along with this program. If not, see <http://www.gnu.org/licenses/>.
 */
-
 #include "aa.h"
 
 #include "common/classes.h"
@@ -31,6 +30,7 @@ Copyright (C) 2001-2016 EQEMu Development Team (http://eqemulator.net)
 #include "common/spdat.h"
 #include "common/strings.h"
 #include "zone/bot.h"
+#include "zone/client_version.h"
 #include "zone/client.h"
 #include "zone/corpse.h"
 #include "zone/groups.h"
@@ -46,7 +46,7 @@ Copyright (C) 2001-2016 EQEMu Development Team (http://eqemulator.net)
 extern WorldServer worldserver;
 extern QueryServ* QServ;
 
-void Mob::TemporaryPets(uint16 spell_id, Mob *targ, const char *name_override, uint32 duration_override, bool followme, bool sticktarg, uint16 *eye_id) {
+void Mob::TemporaryPets(int32 spell_id, Mob *targ, const char *name_override, uint32 duration_override, bool followme, bool sticktarg, uint16 *eye_id) {
 
 	//It might not be a bad idea to put these into the database, eventually..
 
@@ -156,12 +156,23 @@ void Mob::TemporaryPets(uint16 spell_id, Mob *targ, const char *name_override, u
 
 		swarm_pet_npc->StartSwarmTimer(pet_duration * 1000);
 
+		Mob *swarm_owner = this;
+		if (IsPet() || IsTempPet()) {
+			Mob *ultimate_owner = GetUltimateOwner();
+			if (ultimate_owner && ultimate_owner->IsClient()) {
+				swarm_owner = ultimate_owner;
+			}
+		}
+
 		//removing this prevents the pet from attacking
-		swarm_pet_npc->GetSwarmInfo()->owner_id = GetID();
+		swarm_pet_npc->GetSwarmInfo()->owner_id = swarm_owner->GetID();
 
 		//give the pets somebody to "love"
 		if (targ != nullptr) {
 			swarm_pet_npc->AddToHateList(targ, 1000, 1000);
+			if (swarm_pet_npc->IsAttackAllowed(targ)) {
+				swarm_pet_npc->SetTarget(targ);
+			}
 			if (RuleB(Spells, SwarmPetTargetLock) || sticktarg) {
 				swarm_pet_npc->GetSwarmInfo()->target = targ->GetID();
 				swarm_pet_npc->SetPetTargetLockID(targ->GetID());
@@ -184,7 +195,7 @@ void Mob::TemporaryPets(uint16 spell_id, Mob *targ, const char *name_override, u
 		entity_list.AddNPC(swarm_pet_npc, true, true);
 		if (swarm_pet_command_anchor) {
 			SetPetID(swarm_pet_npc->GetID());
-			swarm_pet_npc->SendPetBuffsToClient();
+			ClientPatch::SendFullBuffRefresh(swarm_pet_npc);
 			swarm_pet_npc->SendAppearancePacket(AppearanceType::Pet, GetID(), true, true);
 			auto client_owner = CastToClient();
 			client_owner->SetPetCommandState(PetButton::Sit, PetButtonState::Off);
@@ -304,7 +315,7 @@ void Mob::TypesTemporaryPets(uint32 typesid, Mob *targ, const char *name_overrid
 		entity_list.AddNPC(swarm_pet_npc, true, true);
 		if (swarm_pet_command_anchor) {
 			SetPetID(swarm_pet_npc->GetID());
-			swarm_pet_npc->SendPetBuffsToClient();
+			ClientPatch::SendFullBuffRefresh(swarm_pet_npc);
 			swarm_pet_npc->SendAppearancePacket(AppearanceType::Pet, GetID(), true, true);
 			auto client_owner = CastToClient();
 			client_owner->SetPetCommandState(PetButton::Sit, PetButtonState::Off);
@@ -319,7 +330,7 @@ void Mob::TypesTemporaryPets(uint32 typesid, Mob *targ, const char *name_overrid
 	delete made_npc;
 }
 
-void Mob::WakeTheDead(uint16 spell_id, Corpse *corpse_to_use, Mob *tar, uint32 duration) {
+void Mob::WakeTheDead(int32 spell_id, Corpse *corpse_to_use, Mob *tar, uint32 duration) {
 
 	/*
 		SPA 299 Wake The Dead, 'animateDead' should be temp pet, always spawns 1 pet from corpse, max value is duration
@@ -540,7 +551,7 @@ void Mob::WakeTheDead(uint16 spell_id, Corpse *corpse_to_use, Mob *tar, uint32 d
 		entity_list.AddNPC(swarm_pet_npc, true, true);
 		if (swarm_pet_command_anchor) {
 			SetPetID(swarm_pet_npc->GetID());
-			swarm_pet_npc->SendPetBuffsToClient();
+			ClientPatch::SendFullBuffRefresh(swarm_pet_npc);
 			swarm_pet_npc->SendAppearancePacket(AppearanceType::Pet, GetID(), true, true);
 			auto client_owner = CastToClient();
 			client_owner->SetPetCommandState(PetButton::Sit, PetButtonState::Off);
@@ -621,13 +632,18 @@ void Client::SendClearLeadershipAA()
 
 int Client::GroupLeadershipAAHealthEnhancement()
 {
+	// Live removed the leadership stat bonuses and the ToB client does not count them in its own HP/mana/regen
+	if (ClientVersion() >= EQ::versions::ClientVersion::TOB && !RuleB(Character, LeadershipStatBonusesForToB)) {
+		return 0;
+	}
+
 	if (IsRaidGrouped()) {
 		int bonus = 0;
 		Raid *raid = GetRaid();
 		if (!raid)
 			return 0;
 		uint32 group_id = raid->GetGroup(this);
-		if (group_id < 12 && raid->GroupCount(group_id) >= 3) {
+		if (group_id < 12 && raid->GroupCount(group_id) >= RuleI(Character, LeadershipMinGroupSize)) {
 			switch (raid->GetLeadershipAA(groupAAHealthEnhancement, group_id)) {
 			case 1:
 				bonus = 30;
@@ -658,10 +674,13 @@ int Client::GroupLeadershipAAHealthEnhancement()
 
 	Group *g = GetGroup();
 
-	if(!g || (g->GroupCount() < 3))
-		return 0;
+	int rank = 0;
+	if (g && g->GroupCount() >= RuleI(Character, LeadershipMinGroupSize))
+		rank = g->GetLeadershipAA(groupAAHealthEnhancement);
+	else if (!g)
+		rank = GetSoloLeadershipAA(groupAAHealthEnhancement);
 
-	switch(g->GetLeadershipAA(groupAAHealthEnhancement))
+	switch(rank)
 	{
 		case 0:
 			return 0;
@@ -678,13 +697,18 @@ int Client::GroupLeadershipAAHealthEnhancement()
 
 int Client::GroupLeadershipAAManaEnhancement()
 {
+	// Live removed the leadership stat bonuses and the ToB client does not count them in its own HP/mana/regen
+	if (ClientVersion() >= EQ::versions::ClientVersion::TOB && !RuleB(Character, LeadershipStatBonusesForToB)) {
+		return 0;
+	}
+
 	if (IsRaidGrouped()) {
 		int bonus = 0;
 		Raid *raid = GetRaid();
 		if (!raid)
 			return 0;
 		uint32 group_id = raid->GetGroup(this);
-		if (group_id < 12 && raid->GroupCount(group_id) >= 3) {
+		if (group_id < 12 && raid->GroupCount(group_id) >= RuleI(Character, LeadershipMinGroupSize)) {
 			switch (raid->GetLeadershipAA(groupAAManaEnhancement, group_id)) {
 			case 1:
 				bonus = 30;
@@ -715,10 +739,13 @@ int Client::GroupLeadershipAAManaEnhancement()
 
 	Group *g = GetGroup();
 
-	if(!g || (g->GroupCount() < 3))
-		return 0;
+	int rank = 0;
+	if (g && g->GroupCount() >= RuleI(Character, LeadershipMinGroupSize))
+		rank = g->GetLeadershipAA(groupAAManaEnhancement);
+	else if (!g)
+		rank = GetSoloLeadershipAA(groupAAManaEnhancement);
 
-	switch(g->GetLeadershipAA(groupAAManaEnhancement))
+	switch(rank)
 	{
 		case 0:
 			return 0;
@@ -735,13 +762,18 @@ int Client::GroupLeadershipAAManaEnhancement()
 
 int Client::GroupLeadershipAAHealthRegeneration()
 {
+	// Live removed the leadership stat bonuses and the ToB client does not count them in its own HP/mana/regen
+	if (ClientVersion() >= EQ::versions::ClientVersion::TOB && !RuleB(Character, LeadershipStatBonusesForToB)) {
+		return 0;
+	}
+
 	if (IsRaidGrouped()) {
 		int bonus = 0;
 		Raid *raid = GetRaid();
 		if (!raid)
 			return 0;
 		uint32 group_id = raid->GetGroup(this);
-		if (group_id < 12 && raid->GroupCount(group_id) >= 3) {
+		if (group_id < 12 && raid->GroupCount(group_id) >= RuleI(Character, LeadershipMinGroupSize)) {
 			switch (raid->GetLeadershipAA(groupAAHealthRegeneration, group_id)) {
 			case 1:
 				bonus = 4;
@@ -772,10 +804,13 @@ int Client::GroupLeadershipAAHealthRegeneration()
 
 	Group *g = GetGroup();
 
-	if(!g || (g->GroupCount() < 3))
-		return 0;
+	int rank = 0;
+	if (g && g->GroupCount() >= RuleI(Character, LeadershipMinGroupSize))
+		rank = g->GetLeadershipAA(groupAAHealthRegeneration);
+	else if (!g)
+		rank = GetSoloLeadershipAA(groupAAHealthRegeneration);
 
-	switch(g->GetLeadershipAA(groupAAHealthRegeneration))
+	switch(rank)
 	{
 		case 0:
 			return 0;
@@ -792,13 +827,18 @@ int Client::GroupLeadershipAAHealthRegeneration()
 
 int Client::GroupLeadershipAAOffenseEnhancement()
 {
+	// Live removed the leadership stat bonuses and the ToB client does not count them in its own HP/mana/regen
+	if (ClientVersion() >= EQ::versions::ClientVersion::TOB && !RuleB(Character, LeadershipStatBonusesForToB)) {
+		return 0;
+	}
+
 	if (IsRaidGrouped()) {
 		int bonus = 0;
 		Raid *raid = GetRaid();
 		if (!raid)
 			return 0;
 		uint32 group_id = raid->GetGroup(this);
-		if (group_id < 12 && raid->GroupCount(group_id) >= 3) {
+		if (group_id < 12 && raid->GroupCount(group_id) >= RuleI(Character, LeadershipMinGroupSize)) {
 			switch (raid->GetLeadershipAA(groupAAOffenseEnhancement, group_id)) {
 			case 1:
 				bonus = 10;
@@ -841,10 +881,13 @@ int Client::GroupLeadershipAAOffenseEnhancement()
 
 	Group *g = GetGroup();
 
-	if(!g || (g->GroupCount() < 3))
-		return 0;
+	int rank = 0;
+	if (g && g->GroupCount() >= RuleI(Character, LeadershipMinGroupSize))
+		rank = g->GetLeadershipAA(groupAAOffenseEnhancement);
+	else if (!g)
+		rank = GetSoloLeadershipAA(groupAAOffenseEnhancement);
 
-	switch(g->GetLeadershipAA(groupAAOffenseEnhancement))
+	switch(rank)
 	{
 		case 0:
 			return 0;
@@ -862,22 +905,36 @@ int Client::GroupLeadershipAAOffenseEnhancement()
 	return 0;
 }
 
-void Client::InspectBuffs(Client* Inspector, int Rank)
+void Client::InspectBuffs(Client* Inspector, int Rank, bool only_mine)
 {
 	// At some point the removed the restriction of being a group member for this to work
 	// not sure when, but the way it's coded now, it wouldn't work with mobs.
 	if (!Inspector || Rank == 0)
 		return;
 
-	auto outapp = new EQApplicationPacket(OP_InspectBuffs, sizeof(InspectBuffs_Struct));
+	// TOB+ also shows the target, who cast each buff, and has the "mine" filter
+	const bool tob = Inspector->ClientVersion() >= EQ::versions::ClientVersion::TOB;
+	if (!tob)
+		only_mine = false;
+
+	auto outapp = new EQApplicationPacket(OP_InspectBuffs, tob ? sizeof(InspectBuffsTOB_Struct) : sizeof(InspectBuffs_Struct));
 	InspectBuffs_Struct *ib = (InspectBuffs_Struct *)outapp->pBuffer;
+	InspectBuffsTOB_Struct *ext = tob ? (InspectBuffsTOB_Struct *)outapp->pBuffer : nullptr;
+	if (ext) {
+		ext->target_id = GetID();
+		ext->cast_by_you = only_mine ? 1 : 0;
+	}
 
 	uint32 buff_count = GetMaxTotalSlots();
 	uint32 packet_index = 0;
-	for (uint32 i = 0; i < buff_count; i++) {
+	for (uint32 i = 0; i < buff_count && packet_index < BUFF_COUNT; i++) {
 		if (!IsValidSpell(buffs[i].spellid))
 			continue;
+		if (only_mine && buffs[i].casterid != Inspector->GetID())
+			continue;
 		ib->spell_id[packet_index] = buffs[i].spellid;
+		if (ext)
+			ext->caster_id[packet_index] = buffs[i].casterid;
 		if (Rank > 1)
 			ib->tics_remaining[packet_index] = spells[buffs[i].spellid].buff_duration_formula == DF_Permanent ? 0xFFFFFFFF : buffs[i].ticsremaining;
 		packet_index++;
@@ -1301,6 +1358,8 @@ void Client::FinishAlternateAdvancementPurchase(AA::Rank *rank, bool ignore_cost
 		if (title_manager.IsNewAATitleAvailable(m_pp.aapoints_spent, GetBaseClass())) {
 			NotifyNewTitlesAvailable();
 		}
+
+		AchievementEvent(Achievement::EventType::SpendAAPoints, 0, GetSpentAA());
 	}
 }
 
@@ -2273,6 +2332,72 @@ void Client::AutoGrantAAPoints() {
 		}
 	}
 
+	SendClearLeadershipAA();
+	SendClearPlayerAA();
+	SendAlternateAdvancementTable();
+	SendAlternateAdvancementPoints();
+	SendAlternateAdvancementStats();
+}
+
+// Veteran reward AAs by account age, keyed by the title string of their first rank so the
+// aa_ability ids can differ between databases. Years are Live's reward schedule.
+void Client::GrantVeteranAAs()
+{
+	if (!RuleB(AA, GrantVeteranAAs)) {
+		return;
+	}
+
+	static const std::map<int, int> veteran_aa_years = {
+		{ 1371, 1 }, // Lesson of the Devoted
+		{ 1372, 2 }, // Infusion of the Faithful
+		{ 1373, 3 }, // Chaotic Jester
+		{ 1374, 4 }, // Expedient Recovery
+		{ 1375, 5 }, // Steadfast Servant
+		{ 1376, 6 }, // Staunch Recovery
+		{ 1377, 7 }, // Intensity of the Resolute
+		{ 4665, 8 }, // Throne of Heroes
+		{ 1037, 9 }, // Armor of Experience
+	};
+
+	int years = RuleI(AA, VeteranAAYearsOverride);
+	if (years < 0) {
+		years = GetAccountAge() / (365 * 24 * 60 * 60);
+	}
+
+	bool granted = false;
+	for (auto &iter : zone->aa_abilities) {
+		auto ability = iter.second.get();
+		auto rank    = ability ? ability->first : nullptr;
+		if (!rank || !ability->grant_only) {
+			continue;
+		}
+
+		auto v = veteran_aa_years.find(rank->title_sid);
+		if (v == veteran_aa_years.end() || v->second > years) {
+			continue;
+		}
+
+		if (!CanUseAlternateAdvancementRank(rank) || HasAlreadyPurchasedRank(rank)) {
+			continue;
+		}
+
+		FinishAlternateAdvancementPurchase(rank, true, false);
+		MessageString(
+			Chat::Yellow,
+			AA_GAIN_ABILITY,
+			std::to_string(rank->title_sid).c_str(),
+			"0",
+			std::to_string(AA_POINTS).c_str()
+		);
+
+		granted = true;
+	}
+
+	if (!granted) {
+		return;
+	}
+
+	SaveAA();
 	SendClearLeadershipAA();
 	SendClearPlayerAA();
 	SendAlternateAdvancementTable();

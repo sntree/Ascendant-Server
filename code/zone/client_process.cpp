@@ -1,20 +1,22 @@
-/*	EQEMu: Everquest Server Emulator
-	Copyright (C) 2001-2003 EQEMu Development Team (http://eqemulator.net)
+/*	EQEmu: EQEmulator
+
+	Copyright (C) 2001-2026 EQEmu Development Team
 
 	This program is free software; you can redistribute it and/or modify
 	it under the terms of the GNU General Public License as published by
-	the Free Software Foundation; version 2 of the License.
+	the Free Software Foundation; either version 3 of the License, or
+	(at your option) any later version.
 
 	This program is distributed in the hope that it will be useful,
-	but WITHOUT ANY WARRANTY except by those people which sell it, which
-	are required to give you total support for your newly bought product;
-	without even the implied warranty of MERCHANTABILITY or FITNESS FOR
-	A PARTICULAR PURPOSE. See the GNU General Public License for more details.
+	but WITHOUT ANY WARRANTY; without even the implied warranty of
+	MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+	GNU General Public License for more details.
 
 	You should have received a copy of the GNU General Public License
-	along with this program; if not, write to the Free Software
-	Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
+	along with this program. If not, see <http://www.gnu.org/licenses/>.
+*/
 
+/*
 	client_process.cpp:
 	Handles client login sequence and packets sent from client to zone
 */
@@ -45,6 +47,8 @@
 
 #include <iostream>
 
+#include "client_version.h"
+
 extern QueryServ* QServ;
 extern Zone* zone;
 extern volatile bool is_zone_loaded;
@@ -58,6 +62,22 @@ bool Client::Process() {
 		// try to send all packets that weren't sent before
 		if (!IsLD() && zoneinpacket_timer.Check()) {
 			SendAllPackets();
+		}
+
+		if (m_advloot_master_looter_refresh.Enabled() && m_advloot_master_looter_refresh.Check()) {
+			m_advloot_master_looter_refresh.Disable();
+
+			Mob *leader = nullptr;
+			if (GetRaid()) {
+				leader = GetRaid()->GetAdvancedLootMasterLooter();
+			}
+			else if (GetGroup()) {
+				leader = GetGroup()->GetAdvancedLootMasterLooter();
+			}
+
+			if (leader && leader->IsClient()) {
+				Corpse::AnnounceAdvancedLootMasterLooter(this, leader->GetCleanName());
+			}
 		}
 
 		if (adventure_request_timer) {
@@ -191,25 +211,7 @@ bool Client::Process() {
 		}
 
 		if (camp_timer.Check()) {
-			Raid *myraid = entity_list.GetRaidByClient(this);
-			if (myraid) {
-				myraid->MemberZoned(this);
-			}
-			LeaveGroup();
-			Save();
-			if (IsInAGuild()) {
-				guild_mgr.UpdateDbMemberOnline(CharacterID(), false);
-				guild_mgr.SendGuildMemberUpdateToWorld(GetName(), GuildID(), 0, time(nullptr));
-			}
-
-			if (GetMerc())
-			{
-				GetMerc()->Save();
-				GetMerc()->Depop();
-			}
-			instalog = true;
-
-			camp_timer.Disable();
+			CompleteCamp();
 		}
 
 		if (IsStunned() && stunned_timer.Check())
@@ -229,11 +231,11 @@ bool Client::Process() {
 			}
 
 			if (song_target == nullptr) {
-				InterruptSpell(SONG_ENDS_ABRUPTLY, 0x121, bardsong);
+				InterruptSpell(SONG_ENDS_ABRUPTLY, Chat::SpellFailure, bardsong);
 			}
 			else {
 				if (!ApplyBardPulse(bardsong, song_target, bardsong_slot)) {
-					InterruptSpell(SONG_ENDS_ABRUPTLY, 0x121, bardsong);
+					InterruptSpell(SONG_ENDS_ABRUPTLY, Chat::SpellFailure, bardsong);
 				}
 			}
 		}
@@ -522,6 +524,7 @@ bool Client::Process() {
 			CalcMaxMana();
 			CalcATK();
 			CalcMaxEndurance();
+			FadeDetrimentalBuffsOutOfCombat();
 			CalcRestState();
 			DoHPRegen();
 			DoManaRegen();
@@ -1090,6 +1093,23 @@ void Client::BulkSendInventoryItems()
 		}
 	}
 
+	// TOB+ key ring items go in the same list, with their ring as the slot type
+	if (IsKeyRingEnabled()) {
+		for (const auto &[slot_id, inst] : m_inv.GetKeyRingItems()) {
+			if (!inst) {
+				continue;
+			}
+
+			inst->Serialize(ob, slot_id);
+
+			if (ob.tellp() == last_pos) {
+				LogInventory("Serialization failed on key ring slot [{}] during BulkSendInventoryItems. Item skipped", slot_id);
+			}
+
+			last_pos = ob.tellp();
+		}
+	}
+
 	auto outapp = new EQApplicationPacket(OP_CharInventory);
 
 	outapp->size    = ob.size();
@@ -1097,6 +1117,55 @@ void Client::BulkSendInventoryItems()
 
 	QueuePacket(outapp);
 	safe_delete(outapp);
+}
+
+void Client::CompleteCamp()
+{
+	Raid *myraid = entity_list.GetRaidByClient(this);
+	if (myraid) {
+		myraid->MemberZoned(this);
+	}
+	LeaveGroup();
+	Save();
+	if (IsInAGuild()) {
+		guild_mgr.UpdateDbMemberOnline(CharacterID(), false);
+		guild_mgr.SendGuildMemberUpdateToWorld(GetName(), GuildID(), 0, time(nullptr));
+	}
+
+	if (GetMerc())
+	{
+		GetMerc()->Save();
+		GetMerc()->Depop();
+	}
+
+	if (RuleB(Bots, Enabled) && bot_camp_timer.Enabled()) {
+		bot_camp_timer.Disable();
+		CampAllBots();
+	}
+
+	instalog = true;
+
+	camp_timer.Disable();
+}
+
+bool Client::IsFastCampZone() const
+{
+	if (!RuleB(Character, EnableFastCamp) || !zone) {
+		return false;
+	}
+
+	if (zone->IsCity() || !zone->CanDoCombat()) {
+		return true;
+	}
+
+	const std::string here = Strings::ToLower(zone->GetShortName());
+	for (auto z : Strings::Split(RuleS(Character, FastCampZones), ',')) {
+		if (Strings::ToLower(Strings::Trim(z)) == here) {
+			return true;
+		}
+	}
+
+	return false;
 }
 
 void Client::BulkSendMerchantInventory(int merchant_id, int npcid) {
@@ -1179,22 +1248,14 @@ void Client::BulkSendMerchantInventory(int merchant_id, int npcid) {
 
 			auto inst = database.CreateItem(item, charges);
 			if (inst) {
-				auto item_price = static_cast<uint32>(item->Price * item->SellRate);
+				auto item_price = GetMerchantBuyPrice(item, npc);
 				auto item_charges = charges ? charges : 1;
-
-				// Don't use SellCostMod if using UseClassicPriceMod
-				if (!RuleB(Merchant, UseClassicPriceMod)) {
-					item_price *= RuleR(Merchant, SellCostMod);
-				}
-
-				if (RuleB(Merchant, UsePriceMod)) {
-					item_price *= Client::CalcPriceMod(npc);
-				}
 
 				inst->SetCharges(item_charges);
 				inst->SetMerchantCount(-1);
 				inst->SetMerchantSlot(ml.slot);
-				inst->SetPrice(item_price);
+				// ToB shows the item price as the alt currency cost (only ToB opens class 70 here)
+				inst->SetPrice(npc && npc->GetClass() == Class::AlternateCurrencyMerchant ? ml.alt_currency_cost : item_price);
 
 				SendItemPacket(ml.slot - 1, inst, ItemPacketMerchant);
 				safe_delete(inst);
@@ -1228,17 +1289,8 @@ void Client::BulkSendMerchantInventory(int merchant_id, int npcid) {
 			auto charges = item->MaxCharges;
 			auto inst = database.CreateItem(item, charges);
 			if (inst) {
-				auto item_price = static_cast<uint32>(item->Price * item->SellRate);
+				auto item_price = GetMerchantBuyPrice(item, npc);
 				auto item_charges = charges ? charges : 1;
-
-				// Don't use SellCostMod if using UseClassicPriceMod
-				if (!RuleB(Merchant, UseClassicPriceMod)) {
-					item_price *= RuleR(Merchant, SellCostMod);
-				}
-
-				if (RuleB(Merchant, UsePriceMod)) {
-					item_price *= Client::CalcPriceMod(npc);
-				}
 
 				inst->SetCharges(item_charges);
 				inst->SetMerchantCount(ml.charges);
@@ -1286,7 +1338,7 @@ uint8 Client::WithCustomer(uint16 NewCustomer){
 	return 0;
 }
 
-void Client::OPRezzAnswer(uint32 Action, uint32 SpellID, uint16 ZoneID, uint16 InstanceID, float x, float y, float z)
+void Client::OPRezzAnswer(uint32 Action, int32 SpellID, uint16 ZoneID, uint16 InstanceID, float x, float y, float z)
 {
 	if(PendingRezzXP < 0) {
 		// pendingrezexp is set to -1 if we are not expecting an OP_RezzAnswer
@@ -1301,7 +1353,7 @@ void Client::OPRezzAnswer(uint32 Action, uint32 SpellID, uint16 ZoneID, uint16 I
 		// corpse is in has shutdown since the rez spell was cast.
 		database.MarkCorpseAsResurrected(PendingRezzDBID);
 		LogSpells("Player [{}] got a [{}] Rezz spellid [{}] in zone[{}] instance id [{}]",
-				name, (uint16)spells[SpellID].base_value[0],
+				name, spells[SpellID].base_value[0],
 				SpellID, ZoneID, InstanceID);
 
 		const bool use_old_resurrection = (
@@ -1314,7 +1366,7 @@ void Client::OPRezzAnswer(uint32 Action, uint32 SpellID, uint16 ZoneID, uint16 I
 			)
 		);
 
-		const uint16 resurrection_sickness_spell_id = (
+		const int32 resurrection_sickness_spell_id = (
 			use_old_resurrection ?
 			RuleI(Character, OldResurrectionSicknessSpellID) :
 			RuleI(Character, ResurrectionSicknessSpellID)
@@ -2325,6 +2377,39 @@ void Client::CalcRestState()
 	ooc_regen = true;
 }
 
+void Client::FadeDetrimentalBuffsOutOfCombat()
+{
+	// Removes detrimental (negative) spell effects once the player is FULLY
+	// out of combat. "Fully out of combat" means nothing has us on its aggro
+	// count AND the rest timer has finished counting down -- so this does not
+	// fire during the post-combat cooldown/countdown, only after it expires.
+	// Spells flagged allow_rest are left alone (same set that is permitted to
+	// persist during rest regen).
+	if (!RuleB(Ascendant, FadeDetrimentalBuffsOutOfCombat)) {
+		return;
+	}
+
+	// still have aggro, or still in the post-combat countdown
+	if (AggroCount || !rest_timer.Check(false)) {
+		return;
+	}
+
+	uint32 buff_count = GetMaxTotalSlots();
+	for (unsigned int j = 0; j < buff_count; j++) {
+		if (!IsValidSpell(buffs[j].spellid)) {
+			continue;
+		}
+
+		if (
+			IsDetrimentalSpell(buffs[j].spellid) &&
+			buffs[j].ticsremaining > 0 &&
+			!IsRestAllowedSpell(buffs[j].spellid)
+		) {
+			BuffFadeBySlot(j);
+		}
+	}
+}
+
 void Client::DoTracking()
 {
 	if (!TrackingID) {
@@ -2495,6 +2580,10 @@ void Client::HandleRespawnFromHover(uint32 Option)
 
 			FastQueuePacket(&outapp);
 
+			// Client::SetMaxHP does nothing while dead is set, and ClearHover only clears it below,
+			// so the respawn kept the death HP and the client bled out again.
+			dead = false;
+
 			CalcBonuses();
 			RestoreHealth();
 			RestoreMana();
@@ -2540,7 +2629,13 @@ void Client::HandleRespawnFromHover(uint32 Option)
 
 		Save();
 
-		MovePC(chosen->zone_id, chosen->instance_id, chosen->x, chosen->y, chosen->z, chosen->heading, 1);
+		// The bind choice goes through the normal death-to-bind path, which sends OP_ZonePlayerToBind:
+		// that packet is what closes the respawn window on newer clients (ToB keeps it open otherwise).
+		if (Option == 0 || default_to_bind) {
+			MovePC(chosen->zone_id, chosen->instance_id, chosen->x, chosen->y, chosen->z, chosen->heading, 1, ZoneToBindPoint);
+		} else {
+			MovePC(chosen->zone_id, chosen->instance_id, chosen->x, chosen->y, chosen->z, chosen->heading, 1);
+		}
 	}
 
 	safe_delete(default_to_bind);
@@ -2550,6 +2645,7 @@ void Client::ClearHover()
 {
 	// Our Entity ID is currently zero, set in Client::Death
 	SetID(entity_list.GetFreeID());
+	entity_list.ReKeyClient(this);
 
 	auto outapp = new EQApplicationPacket(OP_ZoneEntry, sizeof(ServerZoneEntry_Struct));
 	ServerZoneEntry_Struct* sze = (ServerZoneEntry_Struct*)outapp->pBuffer;
@@ -2562,11 +2658,7 @@ void Client::ClearHover()
 	entity_list.QueueClients(this, outapp, false);
 	safe_delete(outapp);
 
-	if (IsClient() && CastToClient()->ClientVersionBit() & EQ::versions::maskUFAndLater)
-	{
-		EQApplicationPacket *outapp = MakeBuffsPacket(false);
-		CastToClient()->FastQueuePacket(&outapp);
-	}
+	ClientPatch::SendFullBuffRefresh(this, false, true, true);
 
 	dead = false;
 }

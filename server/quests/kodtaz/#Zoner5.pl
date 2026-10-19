@@ -2,10 +2,16 @@
 sub EVENT_SPAWN {
   	$x = $npc->GetX();
    	$y = $npc->GetY();
-	quest::set_proximity($x - 10, $x + 10, $y - 10, $y + 10);
+	quest::set_proximity($x - 25, $x + 25, $y - 25, $y + 25); # Ascendant: was +-10, hard to find
 }
 
 sub EVENT_ENTER {
+  # Ascendant: ignore players who just zoned in here (exit from the trial lands on this trigger)
+  my $zonein = $client->GetEntityVariable("kt_zonein");
+  if ($zonein ne "" && time() - $zonein < 10) {
+    $client->Message(15, "Step off and back onto the entrance to re-enter the temple.");
+    return;
+  }
 	$InInstanceIkky5 = quest::GetInstanceID("ikkinz",4);
   
     if($InInstanceIkky5 > 0){

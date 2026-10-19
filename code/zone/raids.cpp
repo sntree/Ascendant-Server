@@ -1,21 +1,20 @@
-/*	EQEMu: Everquest Server Emulator
-	Copyright (C) 2001-2005 EQEMu Development Team (http://eqemulator.net)
+/*	EQEmu: EQEmulator
+
+	Copyright (C) 2001-2026 EQEmu Development Team
 
 	This program is free software; you can redistribute it and/or modify
 	it under the terms of the GNU General Public License as published by
-	the Free Software Foundation; version 2 of the License.
+	the Free Software Foundation; either version 3 of the License, or
+	(at your option) any later version.
 
 	This program is distributed in the hope that it will be useful,
-	but WITHOUT ANY WARRANTY except by those people which sell it, which
-	are required to give you total support for your newly bought product;
-	without even the implied warranty of MERCHANTABILITY or FITNESS FOR
-	A PARTICULAR PURPOSE. See the GNU General Public License for more details.
+	but WITHOUT ANY WARRANTY; without even the implied warranty of
+	MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+	GNU General Public License for more details.
 
 	You should have received a copy of the GNU General Public License
-	along with this program; if not, write to the Free Software
-	Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
+	along with this program. If not, see <http://www.gnu.org/licenses/>.
 */
-
 #include "common/events/player_event_logs.h"
 #include "common/raid.h"
 #include "common/repositories/character_expedition_lockouts_repository.h"
@@ -24,6 +23,7 @@
 #include "common/strings.h"
 #include "zone/bot.h"
 #include "zone/client.h"
+#include "zone/corpse.h"
 #include "zone/dynamic_zone.h"
 #include "zone/entity.h"
 #include "zone/groups.h"
@@ -117,6 +117,8 @@ void Raid::AddMember(Client *c, uint32 group, bool rleader, bool groupleader, bo
 		return;
 	}
 
+	c->ClearSoloNPCMarks(true);
+
 	const auto query = fmt::format(
 		"REPLACE INTO raid_members SET raidid = {}, charid = {}, bot_id = 0, "
 		"groupid = {}, _class = {}, level = {}, name = '{}', "
@@ -203,6 +205,73 @@ void Raid::AddMember(Client *c, uint32 group, bool rleader, bool groupleader, bo
 
 	SendAssistTarget(c);
 
+	AnnounceAdvancedLootMasterLooter(); // rebuilds the master looter's Give-to list
+}
+
+// TOB+ Advanced Loot: the delegated Raid Master Looter, else the raid leader
+Client *Raid::GetAdvancedLootMasterLooter()
+{
+	if (!m_advloot_master_looter.empty()) {
+		for (const auto &m : members) {
+			if (m.member && !m.is_bot && Strings::EqualFold(m.member->GetCleanName(), m_advloot_master_looter)) {
+				return m.member;
+			}
+		}
+	}
+
+	return GetLeader();
+}
+
+// raid window: the leader delegates Raid Master Looter to a member; delegating the current one again takes it back
+void Raid::DelegateAdvancedLootMasterLooter(Client *delegator, const char *delegatee)
+{
+	if (!delegator || delegator != GetLeader() || !delegatee || !delegatee[0]) {
+		return;
+	}
+
+	const uint32 index = GetPlayerIndex(delegatee);
+	if (index >= MAX_RAID_MEMBERS) {
+		delegator->MessageString(Chat::Cyan, NOT_IN_YOUR_RAID, delegatee);
+		return;
+	}
+
+	if (!members[index].member) {
+		delegator->Message(Chat::Cyan, fmt::format("{} must be in this zone to become Raid Master Looter.", delegatee).c_str());
+		return;
+	}
+
+	Client *c = members[index].member;
+	const bool clear = Strings::EqualFold(m_advloot_master_looter, c->GetCleanName());
+	m_advloot_master_looter = clear ? "" : c->GetCleanName();
+
+	auto outapp = new EQApplicationPacket(OP_RaidDelegateAbility, sizeof(DelegateAbility_Struct));
+	auto das = (DelegateAbility_Struct *) outapp->pBuffer;
+	das->DelegateAbility = RaidDelegateMasterLooter;
+	das->Action          = clear ? ClearDelegate : SetDelegate;
+	das->EntityID        = c->GetID();
+	das->Unknown024      = c->CharacterID(); // ToB matches delegates against the character id
+	strn0cpy(das->Name, c->GetName(), sizeof(das->Name));
+	for (const auto &m : members) { // only TOB+ knows this ability; older clients have no encoder for it
+		if (m.member && !m.is_bot && m.member->ClientVersion() >= EQ::versions::ClientVersion::TOB) {
+			m.member->QueuePacket(outapp);
+		}
+	}
+	safe_delete(outapp);
+
+	AnnounceAdvancedLootMasterLooter();
+}
+
+void Raid::AnnounceAdvancedLootMasterLooter()
+{
+	if (!GetAdvancedLootMasterLooter()) {
+		return;
+	}
+
+	for (const auto &m : members) {
+		if (m.member && !m.is_bot && m.member->ClientVersion() >= EQ::versions::ClientVersion::TOB) {
+			m.member->QueueAdvancedLootMasterLooterRefresh();
+		}
+	}
 }
 
 void Raid::AddBot(Bot* b, uint32 group, bool raid_leader, bool group_leader, bool looter)
@@ -404,6 +473,8 @@ void Raid::SetRaidLeader(const char *wasLead, const char *name)
 	LearnMembers();
 	VerifyRaid();
 	SendMakeLeaderPacket(name);
+
+	AnnounceAdvancedLootMasterLooter();
 
 	auto pack = new ServerPacket(ServerOP_RaidLeader, sizeof(ServerRaidGeneralAction_Struct));
 	auto rga = (ServerRaidGeneralAction_Struct*)pack->pBuffer;
@@ -656,7 +727,7 @@ Client *Raid::GetClientByIndex(uint16 index)
 	return members[index].member;
 }
 
-void Raid::CastGroupSpell(Mob* caster, uint16 spellid, uint32 gid)
+void Raid::CastGroupSpell(Mob* caster, int32 spellid, uint32 gid)
 {
 	float range, distance;
 
@@ -1015,12 +1086,34 @@ void Raid::TeleportRaid(Mob* sender, uint32 zoneID, uint16 instance_id, float x,
 	}
 }
 
+// ToB keeps the raid loot type and looter list in client state and only learns them from RaidUpdate actions
+// 32 (loot type, parameter), 33 / 34 (add / remove looter, name in leader_name); older clients get nothing here.
+template <typename Members>
+static void SendTOBRaidLootUpdate(Members& members, uint32 action, const char* name, uint32 parameter)
+{
+	auto outapp = new EQApplicationPacket(OP_RaidUpdate, sizeof(RaidGeneral_Struct));
+	auto rg = (RaidGeneral_Struct*) outapp->pBuffer;
+	rg->action = action;
+	if (name) {
+		strn0cpy(rg->leader_name, name, sizeof(rg->leader_name));
+		strn0cpy(rg->player_name, name, sizeof(rg->player_name));
+	}
+	rg->parameter = parameter;
+	for (auto& m : members) {
+		if (!m.is_bot && m.member && m.member->ClientVersion() >= EQ::versions::ClientVersion::TOB) {
+			m.member->QueuePacket(outapp);
+		}
+	}
+	safe_delete(outapp);
+}
+
 void Raid::ChangeLootType(uint32 type)
 {
 	std::string query = StringFormat("UPDATE raid_details SET loottype = %lu WHERE raidid = %lu",
 									 (unsigned long)type, (unsigned long)GetID());
 	auto results = database.QueryDatabase(query);
 	LootType = type;
+	SendTOBRaidLootUpdate(members, 32, nullptr, type);
 }
 
 void Raid::AddRaidLooter(const char* looter)
@@ -1038,6 +1131,7 @@ void Raid::AddRaidLooter(const char* looter)
 			break;
 		}
 	}
+	SendTOBRaidLootUpdate(members, 33, looter, 0);
 
 	auto pack = new ServerPacket(ServerOP_DetailsChange, sizeof(ServerRaidGeneralAction_Struct));
 	auto rga = (ServerRaidGeneralAction_Struct*)pack->pBuffer;
@@ -1063,6 +1157,7 @@ void Raid::RemoveRaidLooter(const char* looter)
 			break;
 		}
 	}
+	SendTOBRaidLootUpdate(members, 34, looter, 0);
 
 	auto pack = new ServerPacket(ServerOP_DetailsChange, sizeof(ServerRaidGeneralAction_Struct));
 	auto rga = (ServerRaidGeneralAction_Struct*)pack->pBuffer;
@@ -2381,6 +2476,7 @@ void Raid::DelegateAbilityAssist(Mob* delegator, const char* delegatee)
 	das->DelegateAbility = RaidDelegateMainAssist;
 	das->MemberNumber = slot + 1;
 	das->EntityID = c->GetID();
+	das->Unknown024 = c->CharacterID(); // ToB matches delegates against the character id
 	strcpy(das->Name, delegatee);
 	QueuePacket(outapp);
 	safe_delete(outapp);
@@ -2514,6 +2610,7 @@ void Raid::DelegateAbilityMark(Mob* delegator, const char* delegatee)
 	das->DelegateAbility = RaidDelegateMainMarker;
 	das->MemberNumber = 0;
 	das->EntityID = c->GetID();
+	das->Unknown024 = c->CharacterID(); // ToB matches delegates against the character id
 	strcpy(das->Name, delegatee);
 	QueuePacket(outapp);
 	safe_delete(outapp);
@@ -2865,6 +2962,7 @@ void Raid::SendRaidAssisterTo(const char* assister, Client* to)
 			das->DelegateAbility = RaidDelegateMainAssist;
 			das->MemberNumber = 0;
 			das->EntityID = m_id;
+			das->Unknown024 = mob->IsClient() ? mob->CastToClient()->CharacterID() : 0; // ToB: character id
 			strcpy(das->Name, assister);
 			to->QueuePacket(outapp);
 			safe_delete(outapp);
@@ -2889,6 +2987,7 @@ void Raid::SendRaidAssister(const char* assister)
 			das->DelegateAbility = RaidDelegateMainAssist;
 			das->MemberNumber = 0;
 			das->EntityID = m_id;
+			das->Unknown024 = mob->IsClient() ? mob->CastToClient()->CharacterID() : 0; // ToB: character id
 			strcpy(das->Name, assister);
 			QueuePacket(outapp);
 			safe_delete(outapp);
@@ -2921,6 +3020,7 @@ void Raid::SendRaidMarkerTo(const char* marker, Client* to)
 			das->DelegateAbility = RaidDelegateMainMarker;
 			das->MemberNumber = 0;
 			das->EntityID = m_id;
+			das->Unknown024 = mob->IsClient() ? mob->CastToClient()->CharacterID() : 0; // ToB: character id
 			strcpy(das->Name, marker);
 			to->QueuePacket(outapp);
 			safe_delete(outapp);
@@ -2944,6 +3044,7 @@ void Raid::SendRaidMarker(const char* marker)
 			das->DelegateAbility = RaidDelegateMainMarker;
 			das->MemberNumber = 0;
 			das->EntityID = m_id;
+			das->Unknown024 = mob->IsClient() ? mob->CastToClient()->CharacterID() : 0; // ToB: character id
 			strcpy(das->Name, marker);
 			QueuePacket(outapp);
 			safe_delete(outapp);

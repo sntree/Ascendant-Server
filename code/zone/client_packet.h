@@ -1,9 +1,27 @@
+/*	EQEmu: EQEmulator
+
+	Copyright (C) 2001-2026 EQEmu Development Team
+
+	This program is free software; you can redistribute it and/or modify
+	it under the terms of the GNU General Public License as published by
+	the Free Software Foundation; either version 3 of the License, or
+	(at your option) any later version.
+
+	This program is distributed in the hope that it will be useful,
+	but WITHOUT ANY WARRANTY; without even the implied warranty of
+	MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+	GNU General Public License for more details.
+
+	You should have received a copy of the GNU General Public License
+	along with this program. If not, see <http://www.gnu.org/licenses/>.
+*/
 	/* Connecting OpCode Handlers */
 	void Handle_Connect_0x3e33(const EQApplicationPacket *app);
 	void Handle_Connect_OP_ApproveZone(const EQApplicationPacket *app);
 	void Handle_Connect_OP_ClientError(const EQApplicationPacket *app);
 	void Handle_Connect_OP_ClientReady(const EQApplicationPacket *app);
 	void Handle_Connect_OP_ClientUpdate(const EQApplicationPacket *app);
+	void Handle_Connect_OP_DragonHoardAction(const EQApplicationPacket *app);
 	void Handle_Connect_OP_ReqClientSpawn(const EQApplicationPacket *app);
 	void Handle_Connect_OP_ReqNewZone(const EQApplicationPacket *app);
 	void Handle_Connect_OP_SendAAStats(const EQApplicationPacket *app);
@@ -15,16 +33,17 @@
 	void Handle_Connect_OP_SetServerFilter(const EQApplicationPacket *app);
 	void Handle_Connect_OP_SpawnAppearance(const EQApplicationPacket *app);
 	void Handle_Connect_OP_TGB(const EQApplicationPacket *app);
+	void Handle_Connect_OP_TradeskillDepot(const EQApplicationPacket *app);
 	void Handle_Connect_OP_UpdateAA(const EQApplicationPacket *app);
 	void Handle_Connect_OP_WearChange(const EQApplicationPacket *app);
 	void Handle_Connect_OP_WorldObjectsSent(const EQApplicationPacket *app);
 	void Handle_Connect_OP_ZoneComplete(const EQApplicationPacket *app);
 	void Handle_Connect_OP_ZoneEntry(const EQApplicationPacket *app);
 	/* Connected opcode handlers*/
-	void Handle_0x0193(const EQApplicationPacket *app);
-	void Handle_0x01e7(const EQApplicationPacket *app);
 	void Handle_OP_AAAction(const EQApplicationPacket *app);
 	void Handle_OP_AcceptNewTask(const EQApplicationPacket *app);
+	void Handle_OP_AchievementCompareRequest(const EQApplicationPacket *app);
+	void Handle_OP_AchievementsCompressed(const EQApplicationPacket *app);
 	void Handle_OP_AdventureInfoRequest(const EQApplicationPacket *app);
 	void Handle_OP_AdventureLeaderboardRequest(const EQApplicationPacket *app);
 	void Handle_OP_AdventureMerchantPurchase(const EQApplicationPacket *app);
@@ -32,10 +51,13 @@
 	void Handle_OP_AdventureMerchantSell(const EQApplicationPacket *app);
 	void Handle_OP_AdventureRequest(const EQApplicationPacket *app);
 	void Handle_OP_AdventureStatsRequest(const EQApplicationPacket *app);
+	void Handle_OP_AdvLoot(const EQApplicationPacket *app);
+	void Handle_OP_AdvLootMisc(const EQApplicationPacket *app);
 	void Handle_OP_AggroMeterLockTarget(const EQApplicationPacket *app);
 	void Handle_OP_AltCurrencyMerchantRequest(const EQApplicationPacket *app);
 	void Handle_OP_AltCurrencyPurchase(const EQApplicationPacket *app);
 	void Handle_OP_AltCurrencyReclaim(const EQApplicationPacket *app);
+	void Handle_OP_AltCurrencyReclaimAll(const EQApplicationPacket *app);
 	void Handle_OP_AltCurrencySell(const EQApplicationPacket *app);
 	void Handle_OP_AltCurrencySellSelection(const EQApplicationPacket *app);
 	void Handle_OP_Animation(const EQApplicationPacket *app);
@@ -57,7 +79,7 @@
 	void Handle_OP_BlockedBuffs(const EQApplicationPacket *app);
 	void Handle_OP_BoardBoat(const EQApplicationPacket *app);
 	void Handle_OP_BookButton(const EQApplicationPacket *app);
-	void Handle_OP_Buff(const EQApplicationPacket *app);
+	void Handle_OP_BuffDefinition(const EQApplicationPacket *app);
 	void Handle_OP_BuffRemoveRequest(const EQApplicationPacket *app);
 	void Handle_OP_Bug(const EQApplicationPacket *app);
 	void Handle_OP_Camp(const EQApplicationPacket *app);
@@ -100,6 +122,7 @@
 	void Handle_OP_DoGroupLeadershipAbility(const EQApplicationPacket *app);
 	void Handle_OP_DuelDecline(const EQApplicationPacket *app);
 	void Handle_OP_DuelAccept(const EQApplicationPacket *app);
+	void Handle_OP_DragonHoardAction(const EQApplicationPacket *app);
 	void Handle_OP_DumpName(const EQApplicationPacket *app);
 	void Handle_OP_Dye(const EQApplicationPacket *app);
 	void Handle_OP_DzAddPlayer(const EQApplicationPacket *app);
@@ -116,8 +139,10 @@
 	void Handle_OP_EnvDamage(const EQApplicationPacket *app);
 	void Handle_OP_EvolveItem(const EQApplicationPacket *app);
 	void Handle_OP_FaceChange(const EQApplicationPacket *app);
+	void Handle_OP_FactionList(const EQApplicationPacket *app);
 	void Handle_OP_FeignDeath(const EQApplicationPacket *app);
 	void Handle_OP_FindPersonRequest(const EQApplicationPacket *app);
+	void Handle_OP_FindZoneConnectionsRequest(const EQApplicationPacket *app);
 	void Handle_OP_Fishing(const EQApplicationPacket *app);
 	void Handle_OP_Forage(const EQApplicationPacket *app);
 	void Handle_OP_FriendsWho(const EQApplicationPacket *app);
@@ -162,6 +187,8 @@
 	void Handle_OP_GuildInviteAccept(const EQApplicationPacket *app);
 	void Handle_OP_GuildLeader(const EQApplicationPacket *app);
 	void Handle_OP_GuildManageBanker(const EQApplicationPacket *app);
+	void Handle_OP_GuildNameRequest(const EQApplicationPacket *app);
+	void Handle_OP_GuildOpenGuildWindow(const EQApplicationPacket *app);
 	void Handle_OP_GuildPeace(const EQApplicationPacket *app);
 	void Handle_OP_GuildPromote(const EQApplicationPacket *app);
 	void Handle_OP_GuildPublicNote(const EQApplicationPacket *app);
@@ -180,6 +207,7 @@
 	void Handle_OP_Hide(const EQApplicationPacket *app);
 	void Handle_OP_HideCorpse(const EQApplicationPacket *app);
 	void Handle_OP_Ignore(const EQApplicationPacket *app);
+	void Handle_OP_TobLiveOnly(const EQApplicationPacket *app);
 	void Handle_OP_Illusion(const EQApplicationPacket *app);
 	void Handle_OP_InspectAnswer(const EQApplicationPacket *app);
 	void Handle_OP_InspectMessageUpdate(const EQApplicationPacket *app);
@@ -188,6 +216,7 @@
 	void Handle_OP_ItemLinkClick(const EQApplicationPacket *app);
 	void Handle_OP_ItemLinkResponse(const EQApplicationPacket *app);
 	void Handle_OP_ItemName(const EQApplicationPacket *app);
+	void Handle_OP_ItemOverflow(const EQApplicationPacket *app);
 	void Handle_OP_ItemPreview(const EQApplicationPacket *app);
 	void Handle_OP_ItemPreviewRequest(const EQApplicationPacket *app);
 	void Handle_OP_ItemVerifyRequest(const EQApplicationPacket *app);
@@ -213,6 +242,11 @@
 	void Handle_OP_LootItem(const EQApplicationPacket *app);
 	void Handle_OP_LootRequest(const EQApplicationPacket *app);
 	void Handle_OP_ManaChange(const EQApplicationPacket *app);
+	void Handle_OP_MarketplaceBalanceRequest(const EQApplicationPacket *app);
+	void Handle_OP_MarketplaceCatalogRequest(const EQApplicationPacket *app);
+	void Handle_OP_MarketplaceItemPreview(const EQApplicationPacket *app);
+	void Handle_OP_MarketplaceOfferStateRequest(const EQApplicationPacket *app);
+	void Handle_OP_MarketplacePurchase(const EQApplicationPacket *app);
 	void Handle_OP_Medding(const EQApplicationPacket *app);
 	void Handle_OP_MemorizeSpell(const EQApplicationPacket *app);
 	void Handle_OP_Mend(const EQApplicationPacket *app);
@@ -222,6 +256,7 @@
 	void Handle_OP_MercenaryDismiss(const EQApplicationPacket *app);
 	void Handle_OP_MercenaryHire(const EQApplicationPacket *app);
 	void Handle_OP_MercenarySuspendRequest(const EQApplicationPacket *app);
+	void Handle_OP_MercenarySwitch(const EQApplicationPacket *app);
 	void Handle_OP_MercenaryTimerRequest(const EQApplicationPacket *app);
 	void Handle_OP_MoveCoin(const EQApplicationPacket *app);
 	void Handle_OP_MoveItem(const EQApplicationPacket *app);
@@ -310,6 +345,7 @@
 	void Handle_OP_TradeRequestAck(const EQApplicationPacket *app);
 	void Handle_OP_TraderShop(const EQApplicationPacket *app);
 	void Handle_OP_TradeSkillCombine(const EQApplicationPacket *app);
+	void Handle_OP_TradeskillDepot(const EQApplicationPacket *app);
 	void Handle_OP_TradeSkillRecipeInspect(const EQApplicationPacket* app);
 	void Handle_OP_Translocate(const EQApplicationPacket *app);
 	void Handle_OP_TributeItem(const EQApplicationPacket *app);

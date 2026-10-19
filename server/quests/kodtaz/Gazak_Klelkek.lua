@@ -61,12 +61,17 @@ function event_say(e)
       e.other:Message(MT.NPCQuestSay, "Gazak Klelkek says, 'I really don't believe you're ready to proceed with anything here. You have to speak with Kevren Nalavat to the north about the trials. Return to me when you have spoken with him.'")
     elseif not is_gm and eq.get_data(preflag_key) == "" then
       e.other:Message(MT.NPCQuestSay, "Gazak Klelkek says, 'Ready to proceed with what? I know I haven't spoken to you about the [" .. eq.say_link("Diabolic Destroyer") .. "], so that can't be it.'")
-    elseif not is_gm and e.other:GetGroupMemberCount() < 2 then -- live probably missing speak_mode say flag here
-      e.other:Message(MT.NPCQuestSay, "I'm sorry, but you don't have enough comrades with you to venture into this dangerous area. Come back when you have at least two friends to join you on this perilous journey.")
+    -- Ascendant: solo-friendly, no group required (live required a group of 2)
     elseif not is_gm and e.other:DoesAnyPartyMemberHaveLockout(expedition_name, "Replay Timer", 6) then
       e.other:Message(MT.NPCQuestSay, "Gazak Klelkek says, 'I'm afraid I cannot allow you to begin, someone in your party has been on this expedition too recently and cannot yet go again.'")
     else
       e.other:Message(MT.NPCQuestSay, ("Gazak Klelkek says, 'Very well then, %s. Good luck on your journey through the temple and may you prove to the brotherhood that you are more than meets the eye. The temple awaits...'"):format(e.other:GetCleanName()))
+      -- Ascendant: a character can only be in one expedition (e.g. a Planeshifter Tyrael DZ)
+      local current_dz = e.other:GetExpedition()
+      if current_dz.valid then
+      	e.other:Message(MT.Yellow, "You are already in the expedition [" .. current_dz:GetName() .. "]. Leave it first (/dzquit), then ask again.")
+      	return
+      end
       local dz = e.other:CreateExpedition(expedition_info)
       if dz.valid then
         dz:AddReplayLockout(eq.seconds("1h"))

@@ -12,7 +12,13 @@ function event_spawn(e)
 end
 
 function event_enter(e)
-	e.self:SpellFinished(982,e.other); -- DT
+	-- Ascendant: death touch removed (no banish / death touch policy).
+	-- Was: e.self:SpellFinished(982,e.other); -- DT (Cazic Touch)
+	-- Instead, send the player back to the Uqua zone-in so the gas chamber can't be skipped.
+	if e.other:IsClient() then
+		e.other:Message(MT.LightGray, "The trap's magic repels you and hurls you back to the entrance of the chantry.");
+		e.other:MovePCInstance(292, eq.get_zone_instance_id(), -17, -7, -26, 0); -- Zone: uqua (safe point)
+	end
 end
 
 function event_signal(e)

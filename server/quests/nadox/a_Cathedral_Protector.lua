@@ -1,5 +1,19 @@
-function event_death_complete(e)
+local charm_credit = require("charm_credit");
+
+local function credit_wave(e)
 eq.signal(227098,1); --signal #Bloodspear_the_Fallen to add to wave counter
+end
+
+function event_death_complete(e)
+charm_credit.credit_once(e, credit_wave);
+end
+
+function event_charm_start(e)
+charm_credit.credit_once(e, credit_wave);
+end
+
+function event_charm_end(e)
+charm_credit.depop_on_charm_end(e);
 end
 
 function event_spawn(e)

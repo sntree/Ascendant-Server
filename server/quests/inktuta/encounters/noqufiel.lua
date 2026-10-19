@@ -154,7 +154,8 @@ function TrueCombat(e)
 			event_started = true;
 		end
 		eq.set_timer("leash",1*1000);
-		eq.set_timer("banish",(15 + math.random(15)) * 1000); -- 15-30s banish while in Noq Form
+		-- Ascendant: banish removed (no banish / death touch policy)
+		-- eq.set_timer("banish",(15 + math.random(15)) * 1000); -- 15-30s banish while in Noq Form
 		eq.set_timer("cursecallers",(15 + math.random(15)) * 1000); -- 15-30s Cursecallers
 	else
 		eq.stop_timer("banish");
@@ -166,7 +167,8 @@ end
 function MirrorCombat(e)
 	if e.joined then
 		eq.set_timer("leash",1*1000);
-		eq.set_timer("banish",(15 + math.random(15)) * 1000); -- 15-30s banish while in Noq Form
+		-- Ascendant: banish removed (no banish / death touch policy)
+		-- eq.set_timer("banish",(15 + math.random(15)) * 1000); -- 15-30s banish while in Noq Form
 		eq.set_timer("cursecallers",(15 + math.random(15)) * 1000); -- 15-30s Cursecallers
 	else
 		eq.stop_timer("banish");
@@ -192,7 +194,8 @@ function TrueTimer(e)
 				top_hate_v:MovePCInstance(296, eq.get_zone_instance_id(), -117, -912, -127, 128)
 			end
 		end
-		eq.set_timer("banish",(15 + math.random(15)) * 1000); -- 15-30s banish while in Noq Form
+		-- Ascendant: banish removed (no banish / death touch policy)
+		-- eq.set_timer("banish",(15 + math.random(15)) * 1000); -- 15-30s banish while in Noq Form
 	elseif e.timer == "cursecallers" then
 		eq.stop_timer(e.timer);
 		if math.random(100) > 75 then -- 25% chance to spawn cursecaller, these were very sporadic on live which leads me to believe low chance to spawn.
@@ -219,7 +222,8 @@ function MirrorTimer(e)
 				top_hate_v:MovePCInstance(296, eq.get_zone_instance_id(), -117, -912, -127, 128)
 			end
 		end
-		eq.set_timer("banish",(15 + math.random(15)) * 1000); -- 15-30s banish while in Noq Form
+		-- Ascendant: banish removed (no banish / death touch policy)
+		-- eq.set_timer("banish",(15 + math.random(15)) * 1000); -- 15-30s banish while in Noq Form
 	elseif e.timer == "set_hp" then
 		eq.stop_timer(e.timer);
 		mirror_shake_hp = e.self:GetHP();

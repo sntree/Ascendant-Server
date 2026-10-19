@@ -1,21 +1,20 @@
-/*	EQEMu: Everquest Server Emulator
-	Copyright (C) 2001-2016 EQEMu Development Team (http://eqemulator.org)
+/*	EQEmu: EQEmulator
+
+	Copyright (C) 2001-2026 EQEmu Development Team
 
 	This program is free software; you can redistribute it and/or modify
 	it under the terms of the GNU General Public License as published by
-	the Free Software Foundation; version 2 of the License.
+	the Free Software Foundation; either version 3 of the License, or
+	(at your option) any later version.
 
 	This program is distributed in the hope that it will be useful,
-	but WITHOUT ANY WARRANTY except by those people which sell it, which
-	are required to give you total support for your newly bought product;
-	without even the implied warranty of MERCHANTABILITY or FITNESS FOR
-	A PARTICULAR PURPOSE. See the GNU General Public License for more details.
+	but WITHOUT ANY WARRANTY; without even the implied warranty of
+	MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+	GNU General Public License for more details.
 
 	You should have received a copy of the GNU General Public License
-	along with this program; if not, write to the Free Software
-	Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
+	along with this program. If not, see <http://www.gnu.org/licenses/>.
 */
-
 #include "shareddb.h"
 
 #include "common/classes.h"
@@ -33,6 +32,7 @@
 #include "common/repositories/character_corpses_repository.h"
 #include "common/repositories/character_inspect_messages_repository.h"
 #include "common/repositories/character_item_recast_repository.h"
+#include "common/repositories/character_tradeskill_depot_repository.h"
 #include "common/repositories/criteria/content_filter_criteria.h"
 #include "common/repositories/damageshieldtypes_repository.h"
 #include "common/repositories/inventory_repository.h"
@@ -181,6 +181,94 @@ bool SharedDatabase::SaveCursor(
 	}
 
 	return true;
+}
+
+// Saves a hoard row (null clears it) and the cursor together, so an item is never in both or neither.
+bool SharedDatabase::SaveDragonHoardMove(
+	uint32 char_id,
+	int16 hoard_slot_id,
+	const EQ::ItemInstance* hoard_inst,
+	std::list<EQ::ItemInstance*>::const_iterator& cursor_start,
+	std::list<EQ::ItemInstance*>::const_iterator& cursor_end
+)
+{
+	TransactionBegin();
+
+	if (!SaveInventory(char_id, hoard_inst, hoard_slot_id) || !SaveCursor(char_id, cursor_start, cursor_end)) {
+		TransactionRollback();
+		return false;
+	}
+
+	return TransactionCommit().Success();
+}
+
+bool SharedDatabase::WriteTradeskillDepotRows(uint32 char_id, const std::map<uint32, uint32> &rows)
+{
+	std::vector<CharacterTradeskillDepotRepository::CharacterTradeskillDepot> kept;
+	std::vector<std::string>                                                emptied;
+
+	for (const auto &[item_id, quantity] : rows) {
+		if (!quantity) {
+			emptied.emplace_back(std::to_string(item_id));
+			continue;
+		}
+
+		auto e = CharacterTradeskillDepotRepository::NewEntity();
+		e.character_id = char_id;
+		e.item_id      = item_id;
+		e.quantity     = quantity;
+		kept.emplace_back(e);
+	}
+
+	if (!kept.empty() && !CharacterTradeskillDepotRepository::ReplaceMany(*this, kept)) {
+		return false;
+	}
+
+	if (!emptied.empty()) {
+		const auto results = QueryDatabase(
+			fmt::format(
+				"DELETE FROM `{}` WHERE `character_id` = {} AND `item_id` IN ({})",
+				CharacterTradeskillDepotRepository::TableName(),
+				char_id,
+				Strings::Implode(", ", emptied)
+			)
+		);
+		if (!results.Success()) {
+			return false;
+		}
+	}
+
+	return true;
+}
+
+bool SharedDatabase::SaveTradeskillDepotRows(uint32 char_id, const std::map<uint32, uint32> &rows)
+{
+	TransactionBegin();
+
+	if (!WriteTradeskillDepotRows(char_id, rows)) {
+		TransactionRollback();
+		return false;
+	}
+
+	return TransactionCommit().Success();
+}
+
+bool SharedDatabase::SaveTradeskillDepotMove(
+	uint32 char_id,
+	uint32 item_id,
+	uint32 quantity,
+	std::list<EQ::ItemInstance*>::const_iterator& cursor_start,
+	std::list<EQ::ItemInstance*>::const_iterator& cursor_end
+)
+{
+	TransactionBegin();
+
+	if (!WriteTradeskillDepotRows(char_id, {{item_id, quantity}}) || !SaveCursor(char_id, cursor_start, cursor_end)) {
+		TransactionRollback();
+		return false;
+	}
+
+	return TransactionCommit().Success();
 }
 
 bool SharedDatabase::VerifyInventory(uint32 account_id, int16 slot_id, const EQ::ItemInstance* inst)
@@ -574,6 +662,10 @@ bool SharedDatabase::GetSharedBank(uint32 id, EQ::InventoryProfile *inv, bool is
 			continue;
 		}
 
+		if (e.guid <= INT32_MAX && EQ::ItemInstance::ClaimPersistedSerial(static_cast<int32>(e.guid))) {
+			inst->SetSerialNumber(static_cast<int32>(e.guid));
+		}
+
 		if (item->IsClassCommon()) {
 			for (int i = EQ::invaug::SOCKET_BEGIN; i <= EQ::invaug::SOCKET_END; i++) {
 				if (augment_ids[i]) {
@@ -703,6 +795,11 @@ bool SharedDatabase::GetInventory(Client *c)
 		auto* inst = CreateBaseItem(item, charges);
 		if (!inst) {
 			continue;
+		}
+
+		// keep the persisted serial, so the client's references to this item (hoard, equipment sets) survive zoning
+		if (row.guid <= INT32_MAX && EQ::ItemInstance::ClaimPersistedSerial(static_cast<int32>(row.guid))) {
+			inst->SetSerialNumber(static_cast<int32>(row.guid));
 		}
 
 		if (!row.custom_data.empty()) {
@@ -1399,6 +1496,36 @@ EQ::ItemInstance* SharedDatabase::CreateItem(
 	}
 
 	return inst;
+}
+
+bool SharedDatabase::ReserveItemSerialBlock(int32 &start, int32 &end)
+{
+	constexpr int64 block_size = 10000;
+
+	auto update = QueryDatabase(
+		fmt::format(
+			"UPDATE `item_serial_allocator` SET `next_serial` = LAST_INSERT_ID(`next_serial` + {}) WHERE `id` = 1",
+			block_size
+		)
+	);
+	if (!update.Success() || update.RowsAffected() != 1) {
+		return false;
+	}
+
+	auto results = QueryDatabase("SELECT LAST_INSERT_ID()");
+	if (!results.Success() || results.RowCount() != 1) {
+		return false;
+	}
+
+	const int64 block_end = Strings::ToBigInt(results.begin()[0]);
+	if (block_end - block_size <= 0 || block_end > INT32_MAX) {
+		LogError("Item serial allocator is out of range [{}]", block_end);
+		return false;
+	}
+
+	start = static_cast<int32>(block_end - block_size);
+	end   = static_cast<int32>(block_end);
+	return true;
 }
 
 EQ::ItemInstance* SharedDatabase::CreateBaseItem(const EQ::ItemData* item, int16 charges) {

@@ -1,29 +1,25 @@
-/*	EQEMu: Everquest Server Emulator
-	Copyright (C) 2001-2003 EQEMu Development Team (http://eqemulator.net)
+/*	EQEmu: EQEmulator
+
+	Copyright (C) 2001-2026 EQEmu Development Team
 
 	This program is free software; you can redistribute it and/or modify
 	it under the terms of the GNU General Public License as published by
-	the Free Software Foundation; version 2 of the License.
+	the Free Software Foundation; either version 3 of the License, or
+	(at your option) any later version.
 
 	This program is distributed in the hope that it will be useful,
-	but WITHOUT ANY WARRANTY except by those people which sell it, which
-	are required to give you total support for your newly bought product;
-	without even the implied warranty of MERCHANTABILITY or FITNESS FOR
-	A PARTICULAR PURPOSE. See the GNU General Public License for more details.
+	but WITHOUT ANY WARRANTY; without even the implied warranty of
+	MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+	GNU General Public License for more details.
 
 	You should have received a copy of the GNU General Public License
-	along with this program; if not, write to the Free Software
-	Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
+	along with this program. If not, see <http://www.gnu.org/licenses/>.
 */
-
 #include "entity.h"
 
 #include "common/data_verification.h"
-#include "common/eq_constants.h"
 #include "common/features.h"
 #include "common/guilds.h"
-#include "common/races.h"
-#include "common/textures.h"
 #include "zone/bot.h"
 #include "zone/dialogue_window.h"
 #include "zone/dynamic_zone.h"
@@ -45,165 +41,6 @@ extern Zone *zone;
 extern volatile bool is_zone_loaded;
 extern WorldServer worldserver;
 extern uint32 numclients;
-
-namespace {
-
-bool IsGuildLobbyZoneInTrace(Client *client)
-{
-	return client && zone && zone->GetZoneID() == Zones::GUILDLOBBY;
-}
-
-bool IsExpectedPlayerRace(uint16 race)
-{
-	switch (race) {
-	case Race::Human:
-	case Race::Barbarian:
-	case Race::Erudite:
-	case Race::WoodElf:
-	case Race::HighElf:
-	case Race::DarkElf:
-	case Race::HalfElf:
-	case Race::Dwarf:
-	case Race::Troll:
-	case Race::Ogre:
-	case Race::Halfling:
-	case Race::Gnome:
-	case Race::Iksar:
-	case Race::VahShir:
-	case Race::Froglok2:
-	case Race::Drakkin:
-		return true;
-	default:
-		return false;
-	}
-}
-
-bool IsHighRiskGuildLobbySpawn(Mob *spawn, bool is_delayed_packet)
-{
-	if (!spawn) {
-		return false;
-	}
-
-	const auto race = spawn->GetRace();
-
-	bool high_material = false;
-	bool hero_forge    = false;
-	for (uint8 slot = EQ::textures::textureBegin; slot < EQ::textures::materialCount; ++slot) {
-		high_material = high_material || spawn->GetTextureProfileMaterial(slot) > 10000;
-		hero_forge    = hero_forge || spawn->GetTextureProfileHeroForgeModel(slot) != 0;
-	}
-
-	return (
-		is_delayed_packet ||
-		spawn->IsPet() ||
-		spawn->IsMerc() ||
-		spawn->IsCorpse() ||
-		race == Race::Campfire ||
-		(spawn->IsClient() && !IsExpectedPlayerRace(race)) ||
-		(!spawn->IsClient() && race >= 400) ||
-		spawn->GetTexture() > 20 ||
-		(spawn->GetHelmTexture() > 30 && spawn->GetHelmTexture() != 0xFF) ||
-		spawn->GetSize() <= 0.0f ||
-		spawn->GetSize() > 20.0f ||
-		high_material ||
-		hero_forge
-	);
-}
-
-// Mirrors the zone_matches_rule_list lambda in client_process.cpp. Returns true
-// when the current zone's ID is present in the comma-delimited rule value, or the
-// value contains 'all'. Empty/blank disables.
-bool ZoneMatchesRuleList(std::string zone_list)
-{
-	if (!zone) {
-		return false;
-	}
-
-	Strings::Trim(zone_list);
-	if (zone_list.empty()) {
-		return false;
-	}
-
-	for (auto entry : Strings::Split(zone_list, ",")) {
-		Strings::Trim(entry);
-		if (entry.empty()) {
-			continue;
-		}
-
-		if (Strings::EqualFold(entry, "all")) {
-			return true;
-		}
-
-		if (Strings::ToUnsignedInt(entry) == zone->GetZoneID()) {
-			return true;
-		}
-	}
-
-	return false;
-}
-
-// Spawns that the RoF2 client cannot reliably instantiate when delivered in the
-// bulk OP_ZoneSpawns packet. These are sent as individual delayed spawn packets after
-// CLIENT_CONNECTED instead (mirrors the existing illusion/Tree handling).
-// Gated by Zone:DelayMassSpawnUnsafeBulkSpawnsZones; the viewing client's own pet/merc
-// is exempted at the call site to preserve owner zone-in UX.
-// Player texture 255 is normal, so the high texture check only applies to non-clients.
-bool IsMassSpawnUnsafe(Mob *spawn)
-{
-	if (!spawn) {
-		return false;
-	}
-
-	const auto race = spawn->GetRace();
-	bool high_material = false;
-	bool hero_forge    = false;
-	for (uint8 slot = EQ::textures::textureBegin; slot < EQ::textures::materialCount; ++slot) {
-		high_material = high_material || spawn->GetTextureProfileMaterial(slot) > 10000;
-		hero_forge    = hero_forge || spawn->GetTextureProfileHeroForgeModel(slot) != 0;
-	}
-
-	return (
-		spawn->IsPet() ||
-		spawn->IsMerc() ||
-		spawn->IsCorpse() ||
-		race == Race::Campfire ||
-		(spawn->IsClient() && !IsExpectedPlayerRace(race)) ||
-		(!spawn->IsClient() && race >= 400) ||
-		(!spawn->IsClient() && spawn->GetTexture() > 20) ||
-		(spawn->GetHelmTexture() > 30 && spawn->GetHelmTexture() != 0xFF) ||
-		high_material ||
-		hero_forge ||
-		spawn->GetSize() <= 0.0f ||
-		spawn->GetSize() > 20.0f
-	);
-}
-
-const char *GetSpawnTraceType(Mob *spawn)
-{
-	if (!spawn) {
-		return "unknown";
-	}
-
-	if (spawn->IsClient()) {
-		return "client";
-	}
-
-	if (spawn->IsMerc()) {
-		return "merc";
-	}
-
-	if (spawn->IsCorpse()) {
-		return "corpse";
-	}
-
-	if (spawn->IsNPC()) {
-		return "npc";
-	}
-
-	return "mob";
-}
-
-}
 
 Entity::Entity()
 {
@@ -627,6 +464,7 @@ void EntityList::MobProcess()
 		Mob *mob = it->second;
 
 		size_t sz = mob_list.size();
+		const uint32 erasures = mob_list_erasures;
 
 		static int   old_client_count  = 0;
 		static Timer *mob_settle_timer = new Timer();
@@ -690,7 +528,27 @@ void EntityList::MobProcess()
 
 		size_t a_sz = mob_list.size();
 
-		if (a_sz > sz) {
+		if (erasures != mob_list_erasures) {
+			// An entry was erased while this mob processed (a client re-keyed on respawn from hover, a mob
+			// removed by a script or by a new NPC taking its name), so the iterator may point at a freed node.
+			// Find our place again; if the mob itself is gone there is nothing left to clean up.
+			auto found = mob_list.find(id);
+			if (found == mob_list.end() || found->second != mob) {
+				for (found = mob_list.begin(); found != mob_list.end(); ++found) {
+					if (found->second == mob) {
+						break;
+					}
+				}
+			}
+
+			if (found == mob_list.end()) {
+				mob_dead = false;
+				it = mob_list.begin();
+			} else {
+				id = found->first;
+				it = std::next(found);
+			}
+		} else if (a_sz > sz) {
 			//increased size can potentially screw with iterators so reset it to current value
 			//if buckets are re-orderered we may skip a process here and there but since
 			//process happens so often it shouldn't matter much
@@ -1260,7 +1118,8 @@ Entity *EntityList::GetEntityEncounter(uint16 id)
 Entity *EntityList::GetID(uint16 get_id)
 {
 	Entity *ent = 0;
-	if ((ent = entity_list.GetEntityMob(get_id)) != 0)
+	// skip a stale mob_list key left by a client hovering for respawn (its corpse owns this id now)
+	if ((ent = entity_list.GetEntityMob(get_id)) != 0 && ent->GetID() == get_id)
 		return ent;
 	else if ((ent=entity_list.GetEntityDoor(get_id)) != 0)
 		return ent;
@@ -1316,7 +1175,10 @@ Mob *EntityList::GetMob(uint16 get_id)
 	if (get_id == 0)
 		return nullptr;
 
-	if ((ent = entity_list.GetEntityMob(get_id)))
+	// A client hovering after death (Character:RespawnFromHover) stays in mob_list under its old id
+	// with GetID() == 0, while its corpse takes that id. Skip the stale entry so the corpse is found
+	// (otherwise targeting the corpse targets the dead player and rez fails with "only works on corpses").
+	if ((ent = entity_list.GetEntityMob(get_id)) && ent->GetID() == get_id)
 		return ent->CastToMob();
 	else if ((ent = entity_list.GetEntityCorpse(get_id)))
 		return ent->CastToMob();
@@ -1516,16 +1378,6 @@ void EntityList::SendZoneSpawnsBulk(Client *client)
 	NewSpawn_Struct     ns{};
 	Mob                 *spawn;
 	EQApplicationPacket *app;
-	const bool          guild_lobby_trace = IsGuildLobbyZoneInTrace(client);
-	uint32              visible_count = 0;
-	uint32              bulk_count = 0;
-	uint32              delayed_count = 0;
-	uint32              client_count = 0;
-	uint32              npc_count = 0;
-	uint32              corpse_count = 0;
-	uint32              pet_count = 0;
-	uint32              merc_count = 0;
-	uint32              high_risk_count = 0;
 
 	uint32 max_spawns = 100;
 
@@ -1536,17 +1388,6 @@ void EntityList::SendZoneSpawnsBulk(Client *client)
 	auto            bulk_zone_spawn_packet = new BulkZoneSpawnPacket(client, max_spawns);
 	const glm::vec4 &client_position       = client->GetPosition();
 	const float     distance_max           = (600.0 * 600.0);
-	const bool      delay_mass_spawn_unsafe = ZoneMatchesRuleList(RuleS(Zone, DelayMassSpawnUnsafeBulkSpawnsZones));
-
-	if (guild_lobby_trace) {
-		LogInfo(
-			"Guild Lobby zone-in payload: target [{}] instance [{}] phase [zone_spawns_start] mob_list [{}] max_spawns_per_packet [{}]",
-			client->GetName(),
-			zone->GetInstanceID(),
-			mob_list.size(),
-			max_spawns
-		);
-	}
 
 	for (auto & it : mob_list) {
 		spawn = it.second;
@@ -1559,69 +1400,16 @@ void EntityList::SendZoneSpawnsBulk(Client *client)
 
 			bool is_delayed_packet = (
 				DistanceSquared(client_position, spawn_position) > distance_max ||
-				(spawn->IsClient() && (spawn->GetRace() == Race::MinorIllusion || spawn->GetRace() == Race::Tree)) ||
-				(
-					delay_mass_spawn_unsafe &&
-					spawn->GetOwnerID() != client->GetID() &&
-					IsMassSpawnUnsafe(spawn)
-				)
+				(spawn->IsClient() && (spawn->GetRace() == Race::MinorIllusion || spawn->GetRace() == Race::Tree))
 			);
 
-			visible_count++;
-			if (spawn->IsClient()) {
-				client_count++;
-			}
-			if (spawn->IsNPC()) {
-				npc_count++;
-			}
-			if (spawn->IsCorpse()) {
-				corpse_count++;
-			}
-			if (spawn->IsPet()) {
-				pet_count++;
-			}
-			if (spawn->IsMerc()) {
-				merc_count++;
-			}
-
-			if (guild_lobby_trace && IsHighRiskGuildLobbySpawn(spawn, is_delayed_packet)) {
-				high_risk_count++;
-				LogInfo(
-					"Guild Lobby zone-in payload high-risk spawn: target [{}] instance [{}] spawn [{}] spawn_id [{}] npc_type_id [{}] type [{}] delayed [{}] race [{}] model [{}] base_race [{}] gender [{}] texture [{}] helm [{}] size [{}] body [{}] level [{}] class [{}] owner_id [{}] primary_material [{}] secondary_material [{}] primary_hero [{}] secondary_hero [{}]",
-					client->GetName(),
-					zone->GetInstanceID(),
-					spawn->GetCleanName(),
-					spawn->GetID(),
-					spawn->GetNPCTypeID(),
-					GetSpawnTraceType(spawn),
-					is_delayed_packet,
-					spawn->GetRace(),
-					spawn->GetModel(),
-					spawn->GetBaseRace(),
-					spawn->GetGender(),
-					spawn->GetTexture(),
-					spawn->GetHelmTexture(),
-					spawn->GetSize(),
-					spawn->GetBodyType(),
-					spawn->GetLevel(),
-					spawn->GetClass(),
-					spawn->GetOwnerID(),
-					spawn->GetTextureProfileMaterial(EQ::textures::weaponPrimary),
-					spawn->GetTextureProfileMaterial(EQ::textures::weaponSecondary),
-					spawn->GetTextureProfileHeroForgeModel(EQ::textures::weaponPrimary),
-					spawn->GetTextureProfileHeroForgeModel(EQ::textures::weaponSecondary)
-				);
-			}
-
 			if (is_delayed_packet) {
-				delayed_count++;
 				app = new EQApplicationPacket;
 				spawn->CreateSpawnPacket(app);
 				client->QueuePacket(app, true, Client::CLIENT_CONNECTED);
 				safe_delete(app);
 			}
 			else {
-				bulk_count++;
 				memset(&ns, 0, sizeof(NewSpawn_Struct));
 				spawn->FillSpawnStruct(&ns, client);
 				bulk_zone_spawn_packet->AddSpawn(&ns);
@@ -1656,23 +1444,6 @@ void EntityList::SendZoneSpawnsBulk(Client *client)
 	}
 
 	safe_delete(bulk_zone_spawn_packet);
-
-	if (guild_lobby_trace) {
-		LogInfo(
-			"Guild Lobby zone-in payload: target [{}] instance [{}] phase [zone_spawns_done] visible [{}] bulk [{}] delayed [{}] clients [{}] npcs [{}] corpses [{}] pets [{}] mercs [{}] high_risk [{}]",
-			client->GetName(),
-			zone->GetInstanceID(),
-			visible_count,
-			bulk_count,
-			delayed_count,
-			client_count,
-			npc_count,
-			corpse_count,
-			pet_count,
-			merc_count,
-			high_risk_count
-		);
-	}
 }
 
 //this is a hack to handle a broken spawn struct
@@ -1721,42 +1492,12 @@ void EntityList::SendZoneCorpsesBulk(Client *client)
 
 void EntityList::SendZoneObjects(Client *client)
 {
-	const bool guild_lobby_trace = IsGuildLobbyZoneInTrace(client);
-	uint32 object_count = 0;
-
 	auto it = object_list.begin();
 	while (it != object_list.end()) {
 		auto app = new EQApplicationPacket;
 		it->second->CreateSpawnPacket(app);
-		object_count++;
-		if (guild_lobby_trace) {
-			LogInfo(
-				"Guild Lobby zone-in payload object: target [{}] instance [{}] object_id [{}] db_id [{}] model [{}] type [{}] icon [{}] item_id [{}] size [{}] x [{}] y [{}] z [{}]",
-				client->GetName(),
-				zone->GetInstanceID(),
-				it->second->GetID(),
-				it->second->GetDBID(),
-				it->second->GetModelName(),
-				it->second->GetType(),
-				it->second->GetIcon(),
-				it->second->GetItemID(),
-				it->second->GetSize(),
-				it->second->GetX(),
-				it->second->GetY(),
-				it->second->GetZ()
-			);
-		}
 		client->FastQueuePacket(&app);
 		++it;
-	}
-
-	if (guild_lobby_trace) {
-		LogInfo(
-			"Guild Lobby zone-in payload: target [{}] instance [{}] phase [zone_objects_done] count [{}]",
-			client->GetName(),
-			zone->GetInstanceID(),
-			object_count
-		);
 	}
 }
 
@@ -1945,17 +1686,19 @@ void EntityList::QueueClientsByTarget(Mob *sender, const EQApplicationPacket *ap
 						Raid *raid = c->GetRaid();
 						if (raid) {
 							uint32 gid = raid->GetGroup(c);
-							if (gid < MAX_RAID_GROUPS && raid->GroupCount(gid) >= 3) {
+							if (gid < MAX_RAID_GROUPS && raid->GroupCount(gid) >= RuleI(Character, LeadershipMinGroupSize)) {
 								if (raid->GetLeadershipAA(groupAAInspectBuffs, gid))
 									Send = !clear_target_window;
 							}
 						}
 					} else {
 						Group *group = c->GetGroup();
-						if (group && group->GroupCount() >= 3) {
+						if (group && group->GroupCount() >= RuleI(Character, LeadershipMinGroupSize)) {
 							if (group->GetLeadershipAA(groupAAInspectBuffs)) {
 								Send = !clear_target_window;
 							}
+						} else if (!group && c->GetSoloLeadershipAA(groupAAInspectBuffs)) {
+							Send = !clear_target_window;
 						}
 					}
 				} else {
@@ -2927,6 +2670,7 @@ void EntityList::RemoveAllMobs()
 		safe_delete(it->second);
 		free_ids.push(it->first);
 		it = mob_list.erase(it);
+		mob_list_erasures++;
 	}
 }
 
@@ -3075,6 +2819,7 @@ bool EntityList::RemoveMob(uint16 delete_id)
 			free_ids.push(it->first);
 		}
 		mob_list.erase(it);
+		mob_list_erasures++;
 		return true;
 	}
 	return false;
@@ -3105,6 +2850,36 @@ bool EntityList::RemoveNPC(uint16 delete_id)
  * @param mob
  * @return
  */
+// A client's id changes around a respawn-from-hover (Client::Death sets 0 and the corpse takes the old id,
+// ClearHover assigns a new one). Move its mob_list/client_list entries to the current id so lookups find it.
+void EntityList::ReKeyClient(Client *c)
+{
+	if (!c || c->GetID() == 0) {
+		return;
+	}
+
+	for (auto it = mob_list.begin(); it != mob_list.end(); ++it) {
+		if (it->second == c) {
+			if (it->first != c->GetID()) {
+				mob_list.erase(it);
+				mob_list_erasures++;
+				mob_list[c->GetID()] = c;
+			}
+			break;
+		}
+	}
+
+	for (auto it = client_list.begin(); it != client_list.end(); ++it) {
+		if (it->second == c) {
+			if (it->first != c->GetID()) {
+				client_list.erase(it);
+				client_list[c->GetID()] = c;
+			}
+			break;
+		}
+	}
+}
+
 bool EntityList::RemoveMobFromCloseLists(Mob *mob)
 {
 	uint16 entity_id = mob->GetID() > 0 ? mob->GetID() : mob->GetInitialId();
@@ -4721,7 +4496,7 @@ void EntityList::QuestJournalledSayClose(
 		buf.WriteString(message);
 	}
 
-	auto outapp = new EQApplicationPacket(OP_SpecialMesg, buf);
+	auto outapp = new EQApplicationPacket(OP_SpecialMesg, std::move(buf));
 
 	// client only bothers logging if target spawn ID matches, safe to send to everyone
 	QueueCloseClients(sender, outapp, false, dist);
@@ -5326,6 +5101,13 @@ void EntityList::UnMarkNPC(uint16 ID)
 		if (*it)
 			(*it)->UnMarkNPC(ID);
 		++it;
+	}
+
+	// solo marks (rule Character:SoloMarkNPC); skip the mob itself, a client being destroyed
+	for (auto &e : client_list) {
+		if (e.second && e.first != ID) {
+			e.second->UnMarkSoloNPC(ID);
+		}
 	}
 }
 
@@ -5994,6 +5776,26 @@ void EntityList::SendAlternateAdvancementStats() {
 		c.second->SendAlternateAdvancementTable();
 		c.second->SendAlternateAdvancementStats();
 		c.second->SendAlternateAdvancementPoints();
+	}
+}
+
+// after a Marketplace reload, open and cached windows get the new offers
+void EntityList::SendMarketplaceCatalog()
+{
+	for (const auto &[id, client] : client_list) {
+		if (client && client->IsMarketplaceEnabled()) {
+			client->SendMarketplaceCatalog();
+		}
+	}
+}
+
+// coins changed outside the game (Spire); open windows show the new balance
+void EntityList::SendMarketplaceBalances()
+{
+	for (const auto &[id, client] : client_list) {
+		if (client && client->IsMarketplaceEnabled()) {
+			client->SendMarketplaceBalance();
+		}
 	}
 }
 

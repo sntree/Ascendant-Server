@@ -119,6 +119,9 @@ eq.depop_with_timer(293218); -- #Trigger_Kodtaz_1 (293218) assuming event doesnt
 end
 
 function Grand_Spawn(e)
+-- Ascendant: he is aggro-immune so never "in combat"; NPC:OOCRegen (10%/tick) healed back
+-- every golem-death HP drain, so he never reached 10% and the golems never stopped
+e.self:SetOOCRegen(0);
 eq.set_timer("energysiphon", 60 * 1000);
 end
 

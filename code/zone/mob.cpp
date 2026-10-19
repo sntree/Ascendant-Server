@@ -1,21 +1,20 @@
-/*	EQEMu: Everquest Server Emulator
-	Copyright (C) 2001-2016 EQEMu Development Team (http://eqemu.org)
+/*	EQEmu: EQEmulator
+
+	Copyright (C) 2001-2026 EQEmu Development Team
 
 	This program is free software; you can redistribute it and/or modify
 	it under the terms of the GNU General Public License as published by
-	the Free Software Foundation; version 2 of the License.
+	the Free Software Foundation; either version 3 of the License, or
+	(at your option) any later version.
 
 	This program is distributed in the hope that it will be useful,
-	but WITHOUT ANY WARRANTY except by those people which sell it, which
-	are required to give you total support for your newly bought product;
-	without even the implied warranty of MERCHANTABILITY or FITNESS FOR
-	A PARTICULAR PURPOSE. See the GNU General Public License for more details.
+	but WITHOUT ANY WARRANTY; without even the implied warranty of
+	MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+	GNU General Public License for more details.
 
 	You should have received a copy of the GNU General Public License
-	along with this program; if not, write to the Free Software
-	Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
+	along with this program. If not, see <http://www.gnu.org/licenses/>.
 */
-
 #include "mob.h"
 
 #include "common/data_bucket.h"
@@ -1289,6 +1288,14 @@ void Mob::FillSpawnStruct(NewSpawn_Struct* ns, Mob* ForWho)
 	strcpy(ns->spawn.name, name);
 	if(IsClient()) {
 		strn0cpy(ns->spawn.lastName, lastname, sizeof(ns->spawn.lastName));
+		ns->spawn.CharacterGuid.Id = CastToClient()->CharacterID();
+		ns->spawn.CharacterGuid.WorldId = RuleI(World, Id);
+		ns->spawn.CharacterGuid.Reserved = 0;
+	}
+	else {
+		ns->spawn.CharacterGuid.Id = 0;
+		ns->spawn.CharacterGuid.WorldId = 0;
+		ns->spawn.CharacterGuid.Reserved = 0;
 	}
 
 	// Guard against a non-finite (NaN/Inf) position reaching the spawn packet:
@@ -1547,6 +1554,9 @@ void Mob::CreateHPPacket(EQApplicationPacket* app)
 
 void Mob::SendHPUpdate(bool force_update_all)
 {
+	if (IsNPC() && RuleI(Character, ToBNameplateVitalsRange) > 0) {
+		CastToNPC()->SendNameplateVitals();
+	}
 
 	// If our HP is different from last HP update call - let's update selves
 	if (IsClient()) {
@@ -4173,15 +4183,23 @@ void Mob::SendAppearancePacket(
 	safe_delete(outapp);
 }
 
-void Mob::SendLevelAppearance(){
-	auto outapp = new EQApplicationPacket(OP_LevelAppearance, sizeof(LevelAppearance_Struct));
-	LevelAppearance_Struct* la = (LevelAppearance_Struct*)outapp->pBuffer;
+Mob::HealMessageContext Mob::TakeHealMessageContext(uint16 target_id, int32 spell_id)
+{
+	const HealMessageContext context = m_heal_message_context;
+	m_heal_message_context = {};
+
+	const bool matches = context.target_id ? context.target_id == target_id : context.spell_id == spell_id;
+	return matches ? context : HealMessageContext{};
+}
+
+static void FillLevelAppearance(LevelAppearance_Struct* la, uint16 spawn_id)
+{
 	la->parm1 = 0x4D;
 	la->parm2 = la->parm1 + 1;
 	la->parm3 = la->parm2 + 1;
 	la->parm4 = la->parm3 + 1;
 	la->parm5 = la->parm4 + 1;
-	la->spawn_id = GetID();
+	la->spawn_id = spawn_id;
 	la->value1a = 1;
 	la->value2a = 2;
 	la->value3a = 1;
@@ -4189,8 +4207,40 @@ void Mob::SendLevelAppearance(){
 	la->value4a = 1;
 	la->value4b = 1;
 	la->value5a = 2;
+}
+
+void Mob::SendLevelAppearance(){
+	auto outapp = new EQApplicationPacket(OP_LevelAppearance, sizeof(LevelAppearance_Struct));
+	FillLevelAppearance(reinterpret_cast<LevelAppearance_Struct*>(outapp->pBuffer), GetID());
 	entity_list.QueueCloseClients(this,outapp);
 	safe_delete(outapp);
+}
+
+// only ToB clients need this on a level-up; the player's own client gets its level-up from OP_LevelUpdate
+void Mob::SendLevelAppearanceToToB()
+{
+	EQApplicationPacket outapp(OP_LevelAppearance, sizeof(LevelAppearance_Struct));
+	FillLevelAppearance(reinterpret_cast<LevelAppearance_Struct*>(outapp.pBuffer), GetID());
+
+	constexpr float range = 200.0f;
+	const float range_squared = range * range;
+	for (auto& e : GetCloseMobList(range)) {
+		Mob* mob = e.second;
+		if (!mob || mob == this || !mob->IsClient()) {
+			continue;
+		}
+
+		Client* client = mob->CastToClient();
+		if (client->ClientVersion() < EQ::versions::ClientVersion::TOB || !client->Connected()) {
+			continue;
+		}
+
+		if (DistanceSquared(client->GetPosition(), GetPosition()) >= range_squared) {
+			continue;
+		}
+
+		client->QueuePacket(&outapp, true, Client::CLIENT_CONNECTED);
+	}
 }
 
 void Mob::SendAppearanceEffect(uint32 parm1, uint32 parm2, uint32 parm3, uint32 parm4, uint32 parm5, Client *specific_target,
@@ -4466,6 +4516,10 @@ const int64& Mob::SetMana(int64 amount)
 	CalcMaxMana();
 	int64 mmana = GetMaxMana();
 	current_mana = amount < 0 ? 0 : (amount > mmana ? mmana : amount);
+
+	if (IsNPC() && RuleI(Character, ToBNameplateVitalsRange) > 0) {
+		CastToNPC()->MarkNameplateVitalsPending();
+	}
 
 	return current_mana;
 }
@@ -5306,7 +5360,7 @@ uint32 Mob::GetLevelHP(uint8 tlevel)
 	return multiplier;
 }
 
-int32 Mob::GetActSpellCasttime(uint16 spell_id, int32 casttime)
+int32 Mob::GetActSpellCasttime(int32 spell_id, int32 casttime)
 {
 	int32 cast_reducer = GetFocusEffect(focusSpellHaste, spell_id);
 	int32 cast_reducer_amt = GetFocusEffect(focusFcCastTimeAmt, spell_id);
@@ -5327,7 +5381,7 @@ int32 Mob::GetActSpellCasttime(uint16 spell_id, int32 casttime)
 
 }
 
-void Mob::ExecWeaponProc(const EQ::ItemInstance* inst, uint16 spell_id, Mob* on, int level_override)
+void Mob::ExecWeaponProc(const EQ::ItemInstance* inst, int32 spell_id, Mob* on, int level_override)
 {
 	// Changed proc targets to look up based on the spells goodEffect flag.
 	// This should work for the majority of weapons.
@@ -5872,7 +5926,7 @@ void Mob::SetNimbusEffect(uint32 nimbus_effect)
 	}
 }
 
-bool Mob::TrySpellTrigger(Mob *target, uint32 spell_id, int effect)
+bool Mob::TrySpellTrigger(Mob *target, int32 spell_id, int effect)
 {
 	if (!target || !IsValidSpell(spell_id))
 		return false;
@@ -5930,7 +5984,7 @@ bool Mob::TrySpellTrigger(Mob *target, uint32 spell_id, int effect)
 			return true;
 		}
 		else if (IsClient() && spells[spell_id].effect_id[effect_slot] == SpellEffect::Chance_Best_in_Spell_Grp) {
-			uint32 best_spell_id = CastToClient()->GetHighestScribedSpellinSpellGroup(spells[spell_id].limit_value[effect_slot]);
+			int32 best_spell_id = CastToClient()->GetHighestScribedSpellinSpellGroup(spells[spell_id].limit_value[effect_slot]);
 			if (IsValidSpell(best_spell_id)) {
 				SpellFinished(best_spell_id, target, EQ::spells::CastingSlot::Item, 0, -1, spells[best_spell_id].resist_difficulty);
 			}
@@ -5964,7 +6018,7 @@ void Mob::TryTriggerOnCastRequirement()
 }
 
 //Twincast Focus effects should stack across different types (Spell, AA - when implemented ect)
-void Mob::TryTwincast(Mob *caster, Mob *target, uint32 spell_id)
+void Mob::TryTwincast(Mob *caster, Mob *target, int32 spell_id)
 {
 	if (!IsValidSpell(spell_id)) {
 		return;
@@ -6008,7 +6062,7 @@ void Mob::TryTwincast(Mob *caster, Mob *target, uint32 spell_id)
 }
 
 //Used for effects that should occur after the completion of the spell
-void Mob::ApplyHealthTransferDamage(Mob *caster, Mob *target, uint16 spell_id)
+void Mob::ApplyHealthTransferDamage(Mob *caster, Mob *target, int32 spell_id)
 {
 	if (!IsValidSpell(spell_id))
 		return;
@@ -6036,7 +6090,7 @@ void Mob::ApplyHealthTransferDamage(Mob *caster, Mob *target, uint16 spell_id)
 	}
 }
 
-int32 Mob::GetVulnerability(Mob *caster, uint32 spell_id, uint32 ticsremaining, bool from_buff_tic)
+int32 Mob::GetVulnerability(Mob *caster, int32 spell_id, uint32 ticsremaining, bool from_buff_tic)
 {
 	/*
 	Modifies incoming spell damage by percent, to increase or decrease damage, can be limited to specific resists.
@@ -6228,7 +6282,7 @@ bool Mob::TryFadeEffect(int slot)
 			if (spells[buffs[slot].spellid].effect_id[i] == SpellEffect::CastOnFadeEffectAlways ||
 				spells[buffs[slot].spellid].effect_id[i] == SpellEffect::CastOnRuneFadeEffect)
 			{
-				uint16 spell_id = spells[buffs[slot].spellid].base_value[i];
+				int32 spell_id = spells[buffs[slot].spellid].base_value[i];
 				BuffFadeBySlot(slot);
 
 				if(spell_id)
@@ -6254,7 +6308,7 @@ bool Mob::TryFadeEffect(int slot)
 	return false;
 }
 
-void Mob::TrySympatheticProc(Mob* target, uint32 spell_id, EQ::spells::CastingSlot slot)
+void Mob::TrySympatheticProc(Mob* target, int32 spell_id, EQ::spells::CastingSlot slot)
 {
 	if (!target || !IsValidSpell(spell_id) || !IsOfClientBotMerc()) {
 		return;
@@ -6617,7 +6671,7 @@ void Mob::DoKnockback(Mob *caster, uint32 push_back, uint32 push_up)
 	}
 }
 
-void Mob::TrySpellOnKill(uint8 level, uint16 spell_id)
+void Mob::TrySpellOnKill(uint8 level, int32 spell_id)
 {
 	if (IsValidSpell(spell_id))
 	{
@@ -7176,7 +7230,7 @@ int16 Mob::GetModVulnerability(const uint8 resist)
 	return 0;
 }
 
-void Mob::CastOnCurer(uint32 spell_id)
+void Mob::CastOnCurer(int32 spell_id)
 {
 	for(int i = 0; i < EFFECT_COUNT; i++)
 	{
@@ -7190,7 +7244,7 @@ void Mob::CastOnCurer(uint32 spell_id)
 	}
 }
 
-void Mob::CastOnCure(uint32 spell_id)
+void Mob::CastOnCure(int32 spell_id)
 {
 	for(int i = 0; i < EFFECT_COUNT; i++)
 	{
@@ -7204,7 +7258,7 @@ void Mob::CastOnCure(uint32 spell_id)
 	}
 }
 
-void Mob::CastOnNumHitFade(uint32 spell_id)
+void Mob::CastOnNumHitFade(int32 spell_id)
 {
 	if(!IsValidSpell(spell_id))
 		return;
@@ -7316,7 +7370,7 @@ uint16 Mob::GetWeaponSpeedbyHand(uint16 hand) {
 	return weapon_speed;
 }
 
-int8 Mob::GetDecayEffectValue(uint16 spell_id, uint16 spelleffect) {
+int8 Mob::GetDecayEffectValue(int32 spell_id, uint16 spelleffect) {
 
 	if (!IsValidSpell(spell_id))
 		return false;
@@ -7740,7 +7794,7 @@ uint8 Mob::GetSeeInvisibleLevelFromNPCStat(uint16 in_see_invis)
 	return std::min((see_invis_level - 1), MAX_INVISIBILTY_LEVEL);
 }
 
-int32 Mob::GetSpellStat(uint32 spell_id, const char *identifier, uint8 slot)
+int32 Mob::GetSpellStat(int32 spell_id, const char *identifier, uint8 slot)
 {
 	return GetSpellStatValue(spell_id, identifier, slot);
 }

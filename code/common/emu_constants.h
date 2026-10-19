@@ -1,22 +1,20 @@
-/*	EQEMu: Everquest Server Emulator
+/*	EQEmu: EQEmulator
 
-	Copyright (C) 2001-2016 EQEMu Development Team (http://eqemulator.net)
+	Copyright (C) 2001-2026 EQEmu Development Team
 
 	This program is free software; you can redistribute it and/or modify
 	it under the terms of the GNU General Public License as published by
-	the Free Software Foundation; version 2 of the License.
+	the Free Software Foundation; either version 3 of the License, or
+	(at your option) any later version.
 
 	This program is distributed in the hope that it will be useful,
-	but WITHOUT ANY WARRANTY except by those people which sell it, which
-	are required to give you total support for your newly bought product;
-	without even the implied warranty of MERCHANTABILITY or FITNESS FOR
-	A PARTICULAR PURPOSE.  See the GNU General Public License for more details.
+	but WITHOUT ANY WARRANTY; without even the implied warranty of
+	MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+	GNU General Public License for more details.
 
 	You should have received a copy of the GNU General Public License
-	along with this program; if not, write to the Free Software
-	Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+	along with this program. If not, see <http://www.gnu.org/licenses/>.
 */
-
 #pragma once
 
 #include "common/bodytypes.h"
@@ -203,6 +201,38 @@ namespace EQ
 		const int16 CORPSE_BEGIN = invslot::slotGeneral1;
 		const int16 CORPSE_END   = CORPSE_BEGIN + invslot::slotCursor;
 
+		// TOB+ only: positions for Item Overflow window item packets, not inventory slots
+		const int16 OVERFLOW_BEGIN = 20000;
+		const int16 OVERFLOW_END   = 20999;
+
+		// TOB+ only: key ring r, index i is KEYRING_BEGIN + r * KEYRING_STRIDE + i (kept in the inventory table).
+		// Rings: 0 mount, 1 illusion, 2 familiar, 3 Hero's Forge, 4 teleportation, 5 activated items.
+		const int16 KEYRING_BEGIN     = 22000;
+		const int16 KEYRING_STRIDE    = 1000;
+		const int16 KEYRING_RING_SIZE = 500; // most the client holds in one ring
+		const int16 KEYRING_APPEND    = 999; // offset meaning "first free index" (client sends index -1)
+		const int16 KEYRING_COUNT     = 6;
+		const int16 KEYRING_END       = KEYRING_BEGIN + KEYRING_COUNT * KEYRING_STRIDE - 1;
+
+		// client array caps per ring (illusion 300, familiar 450, teleportation 250)
+		inline constexpr int16 KEYRING_CLIENT_SIZE[KEYRING_COUNT] = { 500, 300, 450, 500, 250, 500 };
+
+		constexpr bool IsKeyRingRange(int32 slot_id) { return slot_id >= KEYRING_BEGIN && slot_id <= KEYRING_END; }
+		constexpr int KeyRingFromSlot(int32 slot_id) { return (slot_id - KEYRING_BEGIN) / KEYRING_STRIDE; }
+		constexpr int KeyRingIndexFromSlot(int32 slot_id) { return (slot_id - KEYRING_BEGIN) % KEYRING_STRIDE; }
+		constexpr bool IsKeyRingSlot(int32 slot_id) { return IsKeyRingRange(slot_id) && KeyRingIndexFromSlot(slot_id) < KEYRING_RING_SIZE; }
+		constexpr bool IsKeyRingAppendSlot(int32 slot_id) { return IsKeyRingRange(slot_id) && KeyRingIndexFromSlot(slot_id) == KEYRING_APPEND; }
+		constexpr int16 KeyRingSlot(int ring, int index) { return static_cast<int16>(KEYRING_BEGIN + ring * KEYRING_STRIDE + index); }
+		constexpr int16 KeyRingAppendSlot(int ring) { return KeyRingSlot(ring, KEYRING_APPEND); }
+
+		// TOB+ only: Dragon's Hoard row i is slot DRAGON_HOARD_BEGIN + i (kept in the inventory table).
+		const int16 DRAGON_HOARD_BEGIN = 28000;
+		const int16 DRAGON_HOARD_END   = 29999;
+		const int16 DRAGON_HOARD_SIZE  = DRAGON_HOARD_END - DRAGON_HOARD_BEGIN + 1;
+
+		constexpr bool IsDragonHoardSlot(int32 slot_id) { return slot_id >= DRAGON_HOARD_BEGIN && slot_id <= DRAGON_HOARD_END; }
+		constexpr int16 DragonHoardSlot(int index) { return static_cast<int16>(DRAGON_HOARD_BEGIN + index); }
+
 		using RoF2::invslot::EQUIPMENT_BITMASK;
 		using RoF2::invslot::GENERAL_BITMASK;
 		using RoF2::invslot::CURSOR_BITMASK;
@@ -261,6 +291,12 @@ namespace EQ
 		using RoF2::invaug::GetInvAugIndexName;
 
 	} // namespace invaug
+
+	// feature ids the client looks up in the claims array of OP_PlayerProfile
+	namespace claim {
+		const uint32 DRAGON_HOARD     = 2016763;
+		const uint32 TRADESKILL_DEPOT = 2018125;
+	}
 
 	namespace constants {
 		const EQ::versions::ClientVersion CHARACTER_CREATION_CLIENT = EQ::versions::ClientVersion::Titanium;

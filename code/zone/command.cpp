@@ -1,3 +1,20 @@
+/*	EQEmu: EQEmulator
+
+	Copyright (C) 2001-2026 EQEmu Development Team
+
+	This program is free software; you can redistribute it and/or modify
+	it under the terms of the GNU General Public License as published by
+	the Free Software Foundation; either version 3 of the License, or
+	(at your option) any later version.
+
+	This program is distributed in the hope that it will be useful,
+	but WITHOUT ANY WARRANTY; without even the implied warranty of
+	MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+	GNU General Public License for more details.
+
+	You should have received a copy of the GNU General Public License
+	along with this program. If not, see <http://www.gnu.org/licenses/>.
+*/
 #include "command.h"
 
 #include "common/data_bucket.h"
@@ -79,7 +96,9 @@ int command_init(void)
 
 	if (
 		command_add("acceptrules", "[acceptrules] - Accept the EQEmu Agreement", AccountStatus::Player, command_acceptrules) ||
+		command_add("achievement", "[info|complete|reset|progress] [achievement_id] [component_id] [amount] - Inspect or change achievements for yourself or your target", AccountStatus::GMMgmt, command_achievement) ||
 		command_add("adventure", "[clear|list] - Manage active LDON adventures", AccountStatus::GMMgmt, command_adventure) ||
+		command_add("advloottest", "[corpse|ml|sync|remove|reset|raw|status|off] - Test the TOB Advanced Loot window packets", AccountStatus::GMAdmin, command_advloottest) ||
 		command_add("advnpcspawn", "[maketype|makegroup|addgroupentry|addgroupspawn][removegroupspawn|movespawn|editgroupbox|cleargroupbox]", AccountStatus::GMLeadAdmin, command_advnpcspawn) ||
 		command_add("aggrozone", "[aggro] - Aggro every mob in the zone with X aggro. Default is 0. Not recommend if you're not invulnerable.", AccountStatus::GMAdmin, command_aggrozone) ||
 		command_add("ai", "[factionid/spellslist/con/guard/roambox/stop/start] - Modify AI on NPC target", AccountStatus::GMAdmin, command_ai) ||
@@ -106,6 +125,7 @@ int command_init(void)
 		command_add("delpetition", "[petition number] - Delete a petition", AccountStatus::ApprenticeGuide, command_delpetition) ||
 		command_add("depop", "[Start Spawn Timer] - Depop your NPC target and optionally start their spawn timer (false by default)", AccountStatus::Guide, command_depop) ||
 		command_add("depopzone", "[Start Spawn Timers] - Depop the zone and optionally start spawn timers (false by default)", AccountStatus::GMAdmin, command_depopzone) ||
+		command_add("depot", "[list|add|remove] [item_id] [quantity] - Show or change the Tradeskill Depot of yourself or your target", AccountStatus::GMMgmt, command_depot) ||
 		command_add("devtools", "[menu|window] [enable|disable] - Manages Developer Tools (send no parameter for menu)", AccountStatus::GMMgmt, command_devtools) ||
 		command_add("disablerecipe", "[Recipe ID] - Disables a Recipe", AccountStatus::QuestTroupe, command_disablerecipe) ||
 		command_add("disarmtrap", "Analog for ldon disarm trap for the newer clients since we still don't have it working.", AccountStatus::QuestTroupe, command_disarmtrap) ||
@@ -157,6 +177,7 @@ int command_init(void)
 		command_add("loc", "Print out your or your target's current location and heading", AccountStatus::Player, command_loc) ||
 		command_add("logs", "Manage anything to do with logs", AccountStatus::GMImpossible, command_logs) ||
 		command_add("makepet", "[Pet Name] - Make a pet", AccountStatus::Guide, command_makepet) ||
+		command_add("marketplacecoins", "[show|add|remove|set] [amount] - Show or change the account-wide Marketplace Coins of yourself or your target", AccountStatus::GMMgmt, command_marketplacecoins) ||
 		command_add("memspell", "[Spell ID] [Spell Gem] - Memorize a Spell by ID to the specified Spell Gem for you or your target", AccountStatus::Guide, command_memspell) ||
 		command_add("merchantshop", "Closes or opens your target merchant's shop", AccountStatus::GMAdmin, command_merchantshop) ||
 		command_add("modifynpcstat", "[Stat] [Value] - Modifies an NPC's stats temporarily.", AccountStatus::GMLeadAdmin, command_modifynpcstat) ||

@@ -9,7 +9,7 @@ local event_started = 0;
 local adds = 0;
 
 function Bloodfeaster_Spawn(e)
-  eq.spawn_condition("txevu", 0, 2, 1); --turn decaying corpse and ukun maulers on
+  eq.spawn_condition("txevu", eq.get_zone_instance_id(), 2, 1); --turn decaying corpse and ukun maulers on
   event_started = 0;
   adds = 0;
 	
@@ -151,7 +151,7 @@ function Controller_Spawn(e)
 end
 
 function Controller_Timer(e)
-	eq.spawn_condition("txevu", 0, 2, 0); --turn off decaying corpse and ukun maulers
+	eq.spawn_condition("txevu", eq.get_zone_instance_id(), 2, 0); --turn off decaying corpse and ukun maulers
 	eq.depop_all(297207); --#a_stonemite_corpseburrower (297207)
 	eq.stop_timer("condition");
 end

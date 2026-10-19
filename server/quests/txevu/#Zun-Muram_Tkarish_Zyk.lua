@@ -11,7 +11,8 @@ end
 
 function event_combat(e)
 	if e.joined then
-		eq.set_timer("banishHateTop", eq.ChooseRandom(30,120) * 1000) -- between 30 sec and 2 minute random banish timer
+		-- Ascendant: banish mechanic removed (server policy: no banish / death touch). Handler below is now unused.
+		-- eq.set_timer("banishHateTop", eq.ChooseRandom(30,120) * 1000) -- between 30 sec and 2 minute random banish timer
 		eq.set_timer("spawn_add", add_timer)
 		-- Wanton Destruction, scripted AE
 		eq.set_timer("wanton",15000)
@@ -66,11 +67,11 @@ function event_timer(e)
 				if (banished_pc_v.valid) then
 					local rand = math.random(1,2);
 					if (rand == 1) then
-						banished_pc_v:MovePC(297, 1475, 205, -327, 255) --north jail
+						banished_pc_v:MovePCInstance(297, eq.get_zone_instance_id(), 1475, 205, -327, 255) --north jail
 						eq.spawn2(297076,0,0, 1475, 205, -327, 0)
 						--spawn north jailer npc a_jailer (297076)
 					elseif (rand == 2) then
-						banished_pc_v:MovePC(297, 1475, -205, -327, 0) --south jail
+						banished_pc_v:MovePCInstance(297, eq.get_zone_instance_id(), 1475, -205, -327, 0) --south jail
 						eq.spawn2(297075,0,0, 1475, -205, -327, 0)
 						--spawn south jailer npc a_jailer (297075)
 					end

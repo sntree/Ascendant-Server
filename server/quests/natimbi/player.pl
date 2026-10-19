@@ -1,6 +1,10 @@
 sub EVENT_CLICKDOOR {
   if($doorid == 1) {
-    if(defined($qglobals{god_kodtaz_access}) && defined($qglobals{god_vxed_access}) && defined($qglobals{god_tipt_access})) {
+    # Ascendant (TLP-style access): completing either Vxed or Tipt opens Kod'Taz; sewers not required.
+    # Also honors older temp ("T") flags from finishing either zone in someone else's expedition.
+    my $cid = $client->CharacterID();
+    if(defined($qglobals{god_kodtaz_access}) || defined($qglobals{god_tipt_access})
+       || quest::get_data("$cid-god_vxed") ne "" || quest::get_data("$cid-god_tipt") ne "") {
       if(quest::has_zone_flag(293) != 1) {
   	    quest::set_zone_flag(293);
 	  }
@@ -9,6 +13,11 @@ sub EVENT_CLICKDOOR {
 }
 
 sub EVENT_ENTERZONE {
+  # Ascendant: in a Planeshifter Tyrael instance, make the Cragbeast Queen available
+  # (public natimbi keeps her 1am-3am game-time spawn condition "CBQ" / 5-day respawn).
+  if ($instanceid > 0) {
+    quest::spawn_condition("natimbi", $instanceid, 1, 1);
+  }
 #quest::delglobal("druid_epic_natimbi");
   if (defined($qglobals{druid_epic}) && $qglobals{druid_epic}==6 && !defined $qglobals{druid_epic_natimbi}) {
 	quest::setglobal("druid_epic_natimbi",1,3,"H2");

@@ -25,7 +25,7 @@ function event_combat(e)
 		-- if the time is after 2am turn off the spawn condition that the spawn_event would have done
 		local zone_time = eq.get_zone_time();
 		if (zone_time["zone_hour"] >= 2 and zone_time["zone_hour"] < 24) then
-			eq.spawn_condition("natimbi",0,1,0);
+			eq.spawn_condition("natimbi", eq.get_zone_instance_id(),1,0);
 		end
 	end
 end

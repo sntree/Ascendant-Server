@@ -1,3 +1,5 @@
+local charm_credit = require("potimeb_charm_credit");
+
 --an_inferno_mephit (223095)
 --Phase 1 - Kazrok of Fire Trial
 --potimeb
@@ -13,6 +15,13 @@ function event_spawn(e)
 end
 
 function event_death_complete(e)
-	-- send a signal to the #fire_trigger that I died
-	eq.signal(223173,1);
+	charm_credit.death(e, { {223173, 1} });
+end
+
+function event_charm_start(e)
+	charm_credit.charm_start(e, { {223173, 1} });
+end
+
+function event_charm_end(e)
+	charm_credit.charm_end(e);
 end

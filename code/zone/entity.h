@@ -1,21 +1,20 @@
-/*	EQEMu: Everquest Server Emulator
-	Copyright (C) 2001-2016 EQEMu Development Team (http://eqemulator.net)
+/*	EQEmu: EQEmulator
+
+	Copyright (C) 2001-2026 EQEmu Development Team
 
 	This program is free software; you can redistribute it and/or modify
 	it under the terms of the GNU General Public License as published by
-	the Free Software Foundation; version 2 of the License.
+	the Free Software Foundation; either version 3 of the License, or
+	(at your option) any later version.
 
 	This program is distributed in the hope that it will be useful,
-	but WITHOUT ANY WARRANTY except by those people which sell it, which
-	are required to give you total support for your newly bought product;
-	without even the implied warranty of MERCHANTABILITY or FITNESS FOR
-	A PARTICULAR PURPOSE. See the GNU General Public License for more details.
+	but WITHOUT ANY WARRANTY; without even the implied warranty of
+	MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+	GNU General Public License for more details.
 
 	You should have received a copy of the GNU General Public License
-	along with this program; if not, write to the Free Software
-	Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
+	along with this program. If not, see <http://www.gnu.org/licenses/>.
 */
-
 #pragma once
 
 #include "common/bodytypes.h"
@@ -276,6 +275,8 @@ public:
 	void	RemoveArea(int id);
 	void	ClearAreas();
 	void	ReloadMerchants();
+	void	SendMarketplaceCatalog();
+	void	SendMarketplaceBalances();
 	void	ProcessProximitySay(const char *message, Client *c, uint8 language = 0);
 	Doors *FindDoor(uint8 door_id);
 	Object *FindObject(uint32 object_id);
@@ -446,13 +447,13 @@ public:
 	void AESpell(
 		Mob* caster,
 		Mob* center,
-		uint16 spell_id,
+		int32 spell_id,
 		bool affect_caster = true,
 		int16 resist_adjust = 0,
 		int* max_targets = nullptr,
 		bool is_scripted = false
 	);
-	void MassGroupBuff(Mob* caster, Mob* center, uint16 spell_id, bool affect_caster = true);
+	void MassGroupBuff(Mob* caster, Mob* center, int32 spell_id, bool affect_caster = true);
 
 	//trap stuff
 	Mob*	GetTrapTrigger(Trap* trap);
@@ -546,6 +547,7 @@ public:
 	inline const std::unordered_map<uint16, NPC *> &GetNPCList() { return npc_list; }
 	inline const std::unordered_map<uint16, Merc *> &GetMercList() { return merc_list; }
 	inline const std::unordered_map<uint16, Client *> &GetClientList() { return client_list; }
+	void ReKeyClient(Client *c);
 	inline const std::unordered_map<uint16, Bot*> &GetBotList() { return bot_list; }
 	std::vector<Bot *> GetBotListByCharacterID(uint32 character_id, uint8 class_id = Class::None);
 	std::vector<Bot *> GetBotListByClientName(std::string client_name, uint8 class_id = Class::None);
@@ -600,6 +602,7 @@ private:
 
 	std::unordered_map<uint16, Client *> client_list;
 	std::unordered_map<uint16, Mob *> mob_list;
+	uint32 mob_list_erasures = 0; // bumped on every mob_list erase, so MobProcess can tell its iterator may be stale
 	std::unordered_map<uint16, NPC *> npc_list;
 	std::unordered_map<uint16, Merc *> merc_list;
 	std::unordered_map<uint16, Corpse *> corpse_list;

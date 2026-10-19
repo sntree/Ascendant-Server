@@ -9,6 +9,12 @@ sub EVENT_SPAWN
 {
    $counter = 0;
    $counterone = 0;
+   # Fresh DZ boot: clear any stale ring lockout inherited from a PREVIOUS expedition
+   # that reused this instance id. dust_done is set "F" (forever), so a recycled id
+   # would otherwise permanently skip the Dust ring/Avatar. Cross-session lockout is
+   # the expedition replay timer, not these qglobals.
+   quest::delglobal(_ring_key("dust_done"));
+   quest::delglobal(_ring_key("dust_event_start"));
    quest::settimer(30,60);
 }
 

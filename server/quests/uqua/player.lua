@@ -1,6 +1,6 @@
 local gas_1_range = {-293, -263, -769, -718}
 local gas_2_range = {-886, -850, -801, -750}
-local player_minimum = 6;
+local player_minimum = 1; -- Ascendant: solo-friendly (live required 6 players in the gas chamber)
 
 function event_enter_zone(e)
 	local qglobals = eq.get_qglobals(e.self); 

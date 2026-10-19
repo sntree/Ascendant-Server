@@ -1,21 +1,20 @@
-/*	EQEMu: Everquest Server Emulator
-	Copyright (C) 2001-2002 EQEMu Development Team (http://eqemu.org)
+/*	EQEmu: EQEmulator
+
+	Copyright (C) 2001-2026 EQEmu Development Team
 
 	This program is free software; you can redistribute it and/or modify
 	it under the terms of the GNU General Public License as published by
-	the Free Software Foundation; version 2 of the License.
+	the Free Software Foundation; either version 3 of the License, or
+	(at your option) any later version.
 
 	This program is distributed in the hope that it will be useful,
-	but WITHOUT ANY WARRANTY except by those people which sell it, which
-	are required to give you total support for your newly bought product;
-	without even the implied warranty of MERCHANTABILITY or FITNESS FOR
-	A PARTICULAR PURPOSE. See the GNU General Public License for more details.
+	but WITHOUT ANY WARRANTY; without even the implied warranty of
+	MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+	GNU General Public License for more details.
 
 	You should have received a copy of the GNU General Public License
-	along with this program; if not, write to the Free Software
-	Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
+	along with this program. If not, see <http://www.gnu.org/licenses/>.
 */
-
 #include "spawn2.h"
 
 #include "common/repositories/criteria/content_filter_criteria.h"
@@ -1090,6 +1089,61 @@ bool SpawnConditionManager::LoadSpawnConditions(const std::string& zone_short_na
 	FindNearestEvent();
 
 	return true;
+}
+
+// LoadSpawnConditions runs before world has sent us the real EQ time (the zone clock still
+// defaults to year 3100), so its catch-up never fires and events left stale in spawn_events
+// (zone unused for months) get crawled forward one day per EQ minute in Process(), firing
+// every overdue event each tick (e.g. spawn + despawn back to back, so the NPC never stays up).
+// Called once world time arrives: jump each overdue event past now and replay only its most
+// recent occurrence, oldest first, so the condition ends where the schedule says it should be.
+void SpawnConditionManager::CatchUpEvents()
+{
+	TimeOfDay_Struct tod{};
+	zone->zone_time.GetCurrentEQTimeOfDay(&tod);
+
+	struct Overdue {
+		SpawnEvent       *event;
+		TimeOfDay_Struct last;
+	};
+
+	std::vector<Overdue> overdue;
+
+	for (auto &e : spawn_events) {
+		if (!e.enabled || !EQTime::IsTimeBefore(&tod, &e.next)) {
+			continue;
+		}
+
+		TimeOfDay_Struct last = e.next;
+		while (EQTime::IsTimeBefore(&tod, &e.next)) {
+			last = e.next;
+			EQTime::AddMinutes(e.period, &e.next);
+		}
+
+		LogSpawns("Event [{}]: caught up after world time sync", e.id);
+		UpdateSpawnEvent(e);
+
+		if (!e.strict) {
+			overdue.push_back({&e, last});
+		}
+	}
+
+	if (overdue.empty()) {
+		return;
+	}
+
+	std::sort(
+		overdue.begin(), overdue.end(), [](Overdue &a, Overdue &b) {
+			return EQTime::IsTimeBefore(&b.last, &a.last);
+		}
+	);
+
+	// set actions land on the right final value; add/subtract etc. are applied once rather than per missed period
+	for (auto &o : overdue) {
+		ExecEvent(*o.event, true);
+	}
+
+	FindNearestEvent();
 }
 
 void SpawnConditionManager::FindNearestEvent() {

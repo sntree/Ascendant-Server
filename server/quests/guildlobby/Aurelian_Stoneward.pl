@@ -28,6 +28,42 @@ sub GrantPoPCompletionWands {
     return $granted;
 }
 
+# Gates of Discord finishing set (owner "accessible set", 2026-09-26). Buckets are written
+# per account by global/global_npc.pl EVENT_KILLED_MERIT (%GOD_COMPLETION_BOSSES).
+my @god_completion_bosses = (
+    ['god_cragbeastqueen_', 'Cragbeast Queen',         'Natimbi'],
+    ['god_zunmuramvotal_',  'Zun`Muram Votal',         'Ferubi'],
+    ['god_vrexbarxt_',      'Vrex Barxt Qurat',        'Uqua, the Ocean God Chantry'],
+    ['god_keeperaltar_',    'Keeper of the Altar',     'Ikkinz, Antechamber of Destruction'],
+    ['god_iqthinxa_',       'Iqthinxa Karnkvi',        'Qvic, Prayer Grounds of Calling'],
+    ['god_noqufiel_',       'Noqufiel',                "Inktu`Ta, the Unmasked Chapel"],
+);
+
+# Returns (is_complete, [ [boss_name, zone, defeated], ... ]) for the current client.
+sub GetGoDProgress {
+    my $account_id = $client->AccountID();
+    my $char_name  = $client->GetCleanName();
+    my @rows;
+    my $complete = 1;
+    foreach my $b (@god_completion_bosses) {
+        my ($key, $boss, $zone) = @$b;
+        my $who = quest::get_data($key . $account_id);
+        my $done = ($who && $who eq $char_name) ? 1 : 0;
+        $complete = 0 unless $done;
+        push @rows, [$boss, $zone, $done];
+    }
+    return ($complete, \@rows);
+}
+
+sub CheckGoDComplete {
+    my ($complete) = GetGoDProgress();
+    return $complete;
+}
+
+sub GoDEnabled {
+    return (defined &quest::is_gates_of_discord_enabled && quest::is_gates_of_discord_enabled()) ? 1 : 0;
+}
+
 sub EVENT_SAY {
     if ($text =~ /hail/i) {
         my $account_id = $client->AccountID();
@@ -56,8 +92,17 @@ sub EVENT_SAY {
         my $velious_link = quest::saylink("velious", 1, "Velious");
         my $luclin_link = quest::saylink("luclin", 1, "Luclin");
         my $pop_link = quest::saylink("pop", 1, "Planes of Power");
-        
-        plugin::Whisper("Greetings, $name. I am Aurelian Stoneward, keeper of legendary achievements. I can help you claim rewards for completing $classic_link, $kunark_link, $velious_link, $luclin_link, or $pop_link content.");
+        my $god_enabled = GoDEnabled();
+        my $has_god_char = $god_enabled ? CheckGoDComplete() : 0;
+        my $god_awarded = quest::get_data("god_awarded_" . $char_id);
+
+        if ($god_enabled) {
+            my $god_link = quest::saylink("gates of discord", 1, "Gates of Discord");
+            plugin::Whisper("Greetings, $name. I am Aurelian Stoneward, keeper of legendary achievements. I can help you claim rewards for completing $classic_link, $kunark_link, $velious_link, $luclin_link, $pop_link, or $god_link content.");
+        }
+        else {
+            plugin::Whisper("Greetings, $name. I am Aurelian Stoneward, keeper of legendary achievements. I can help you claim rewards for completing $classic_link, $kunark_link, $velious_link, $luclin_link, or $pop_link content.");
+        }
         
         # Show status
         if ($has_classic_acct && !$classic_awarded) {
@@ -74,6 +119,9 @@ sub EVENT_SAY {
         }
         if ($has_pop_char && !$pop_awarded) {
             plugin::Whisper("I see you have completed the Planes of Power era! You have rewards waiting.");
+        }
+        if ($has_god_char && !$god_awarded) {
+            plugin::Whisper("I see you have completed the Gates of Discord era! You have rewards waiting.");
         }
 
         # Auto-grant era completion titlesets (idempotent). Handles both brand-new
@@ -94,6 +142,9 @@ sub EVENT_SAY {
     }
     elsif ($text =~ /pop/i) {
         HandlePoPRequest();
+    }
+    elsif ($text =~ /gates of discord|\bgod\b/i && GoDEnabled()) {
+        HandleGoDRequest();
     }
 }
 
@@ -212,6 +263,49 @@ sub GrantCompletionTitles {
         quest::enabletitle(421); # the Godbreaker
         quest::set_data("title_pop_421_" . $char_id, "1");
         $client->Message(15, "You have been awarded the title 'the Godbreaker' for conquering the Planes of Power!");
+    }
+
+    if (GoDEnabled() && CheckGoDComplete() && !quest::get_data("title_god_427_" . $char_id)) {
+        quest::enabletitle(427); # the Discordant (+ joke title in set 427)
+        quest::set_data("title_god_427_" . $char_id, "1");
+        $client->Message(15, "You have been awarded the title 'the Discordant' for conquering the Gates of Discord!");
+    }
+}
+
+sub HandleGoDRequest {
+    my $char_id = $client->CharacterID();
+    my ($is_complete, $rows) = GetGoDProgress();
+    my $already_awarded = quest::get_data("god_awarded_" . $char_id);
+
+    my $popup_text = "<c \"#FFD700\"><b>Gates of Discord Era Completion Status</b></c><br><br>"
+                   . "<c \"#FFFFFF\">To complete the Gates of Discord era, you must defeat:</c><br><br>";
+    foreach my $r (@$rows) {
+        my ($boss, $zone, $done) = @$r;
+        my $status = $done ? "<c \"#00FF00\">DEFEATED</c>" : "<c \"#FF0000\">Not Defeated</c>";
+        $popup_text .= "<c \"#00FFFF\">$boss</c> ($zone): $status<br>";
+    }
+    $popup_text .= "<br>";
+
+    if ($already_awarded) {
+        my $simple_popup = "<c \"#FFD700\"><b>Gates of Discord Era Status</b></c><br><br>"
+                         . "<c \"#FFFFFF\">You have already claimed your Gates of Discord rewards on this character!</c>";
+        $client->Popup2("Gates of Discord Era Status", $simple_popup, 0, 0, 0, 0);
+        return;
+    }
+    elsif ($is_complete) {
+        $popup_text .= "<c \"#00FF00\"><b>Congratulations!</b></c><br>"
+                    . "You have broken the Muramite advance on Taelosia!<br><br>"
+                    . "<c \"#FFD700\">Rewards:</c><br>"
+                    . "&bull; The title <c \"#FFD700\">the Discordant</c><br>"
+                    . "&bull; Charm of the Sixth Age (charm upgrade)<br><br>"
+                    . "<c \"#FFAA00\">After claiming, hand me your Charm of the Fifth Age to upgrade it to the Charm of the Sixth Age!</c><br><br>"
+                    . "<c \"#FFFFFF\">Click OK to claim your rewards!</c>";
+        $client->Popup2("Gates of Discord Era Completion", $popup_text, 5011, 5012, 2, 0, "Claim Rewards", "Cancel");
+    }
+    else {
+        $popup_text .= "<c \"#FF9900\">You must defeat all six bosses to complete the Gates of Discord era.</c><br>"
+                    . "Return to me when you have accomplished this feat!";
+        $client->Popup2("Gates of Discord Era Completion", $popup_text, 0, 0, 0, 0);
     }
 }
 
@@ -519,7 +613,7 @@ sub HandleKunarkRequest {
 
 sub EVENT_ITEM {
     # Reject charm turn-ins that have augments — player must remove augs first
-    my @charm_ids = (2827, 2855, 2854, 2829);
+    my @charm_ids = (2827, 2855, 2854, 2829, 4038);
     for my $slot (1..4) {
         my $inst = plugin::val("item${slot}_inst");
         next unless $inst;
@@ -534,7 +628,22 @@ sub EVENT_ITEM {
         }
     }
 
-    if (plugin::check_handin(\%itemcount, 2829 => 1)) {
+    if (plugin::check_handin(\%itemcount, 4038 => 1)) {
+        my $char_id = $client->CharacterID();
+        my $god_awarded = quest::get_data("god_awarded_" . $char_id);
+
+        if ($god_awarded) {
+            # They've completed Gates of Discord, upgrade their charm
+            $client->SummonItem(4042);
+            plugin::Whisper("Your charm has been upgraded! This Charm of the Sixth Age bears the scars of the war against Mata Muram.");
+            $client->Message(15, "You received: Charm of the Sixth Age");
+        }
+        else {
+            plugin::Whisper("You have not yet claimed your Gates of Discord rewards. Please click 'Claim Rewards' first, then hand me the charm.");
+            $client->SummonItem(4038);
+        }
+    }
+    elsif (plugin::check_handin(\%itemcount, 2829 => 1)) {
         my $char_id = $client->CharacterID();
         my $pop_awarded = quest::get_data("pop_awarded_" . $char_id);
 
@@ -870,6 +979,37 @@ sub EVENT_POPUPRESPONSE {
         }
     }
     elsif ($popupid == 5010) {
+        plugin::Whisper("Very well. Return when you are ready to claim your rewards.");
+    }
+    elsif ($popupid == 5011) {
+        # Gates of Discord rewards claim
+        my $char_id = $client->CharacterID();
+        my $char_name = $client->GetCleanName();
+
+        if (quest::get_data("god_awarded_" . $char_id)) {
+            plugin::Whisper("You have already claimed your Gates of Discord rewards!");
+            return;
+        }
+
+        if (GoDEnabled() && CheckGoDComplete()) {
+            quest::enabletitle(427); # the Discordant
+            quest::set_data("title_god_427_" . $char_id, "1");
+            quest::set_data("god_awarded_" . $char_id, $char_name);
+
+            quest::we(15, "$char_name has broken the Muramite war machine and earned the title of the Discordant! Congratulations, champion!");
+
+            $client->Message(15, "\x{2550}" x 51);
+            $client->Message(15, "Gates of Discord Era Rewards Claimed!");
+            $client->Message(15, "You unlocked the title 'the Discordant'!");
+            $client->Message(15, "\x{2550}" x 51);
+
+            plugin::Whisper("Congratulations, $name! Now hand me your Charm of the Fifth Age and I will upgrade it to the Charm of the Sixth Age!");
+        }
+        else {
+            plugin::Whisper("I cannot grant you the rewards. You must defeat all six Gates of Discord bosses first.");
+        }
+    }
+    elsif ($popupid == 5012) {
         plugin::Whisper("Very well. Return when you are ready to claim your rewards.");
     }
 }

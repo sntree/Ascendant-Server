@@ -5,6 +5,12 @@ sub _ring_key { return ($instanceid ? "${instanceid}_" : "") . $_[0]; }
 sub EVENT_SPAWN 
 {
 	$counter = 0;
+	# Fresh DZ boot: clear any stale ring lockout inherited from a PREVIOUS expedition
+	# that reused this instance id. wind_done is set "F" (forever), so a recycled id
+	# would otherwise permanently skip the Wind ring/Avatar. Cross-session lockout is
+	# the expedition replay timer, not these qglobals.
+	quest::delglobal(_ring_key("wind_done"));
+	quest::delglobal(_ring_key("event_start"));
 }
 
 sub EVENT_SIGNAL 

@@ -4,6 +4,7 @@
 #
 # Tiered loot pool with Fisher-Yates shuffle and lore-item skip.
 # Odds: Legendary 0.25%, Jackpot 1%, Exceptional 4%, Rare ~20%, Uncommon ~25%, Common ~50%
+# 5 Dose Token of Resurrection is rerolled 19 times in 20 inside Rare (~0.13% per coin).
 # Returns ($tier_name, $item_id) to the calling NPC script for messaging.
 
 sub _pick_item {
@@ -57,6 +58,11 @@ sub DoGamble {
   }
 
   my $item_id = _pick_item($client, @pool);
+
+  # 5 Dose Token of Resurrection: keep only 1 in 20 draws (~0.13% per coin, was ~2.5%)
+  if ($item_id == 17815 && rand() >= 0.05) {
+    $item_id = _pick_item($client, grep { $_ != 17815 } @pool);
+  }
 
   if (!$item_id || $item_id == 0) {
     $client->Message(13, "Harly frowns - something went wrong with the draw! Please report this.");

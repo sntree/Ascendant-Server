@@ -1,21 +1,20 @@
-/*	EQEMu: Everquest Server Emulator
-	Copyright (C) 2001-2003 EQEMu Development Team (http://eqemulator.net)
+/*	EQEmu: EQEmulator
+
+	Copyright (C) 2001-2026 EQEmu Development Team
 
 	This program is free software; you can redistribute it and/or modify
 	it under the terms of the GNU General Public License as published by
-	the Free Software Foundation; version 2 of the License.
+	the Free Software Foundation; either version 3 of the License, or
+	(at your option) any later version.
 
 	This program is distributed in the hope that it will be useful,
-	but WITHOUT ANY WARRANTY except by those people which sell it, which
-	are required to give you total support for your newly bought product;
-	without even the implied warranty of MERCHANTABILITY or FITNESS FOR
-	A PARTICULAR PURPOSE. See the GNU General Public License for more details.
+	but WITHOUT ANY WARRANTY; without even the implied warranty of
+	MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+	GNU General Public License for more details.
 
 	You should have received a copy of the GNU General Public License
-	along with this program; if not, write to the Free Software
-	Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
+	along with this program. If not, see <http://www.gnu.org/licenses/>.
 */
-
 #include "client.h"
 
 #include "common/eq_packet_structs.h"
@@ -287,12 +286,26 @@ void Client::SendTributes() {
 	for(; cur != end; ++cur) {
 		if(cur->second.is_guild)
 			continue;	//skip guild tributes here
+		if(cur->first == TRIBUTE_NONE)
+			continue;	//never ship a TRIBUTE_NONE (0xFFFFFFFF) id; it crashes the client
 		int len = cur->second.name.length();
-		EQApplicationPacket outapp(OP_TributeInfo, sizeof(TributeAbility_Struct) + len + 1);
+
+		// ToB labels the tiers and fills the description from full item data: append
+		// {magic, n, n x InternalSerializedItem_Struct} after the name (same as SendGuildTributes)
+		const bool tob = ClientVersion() >= EQ::versions::ClientVersion::TOB;
+		std::vector<EQ::ItemInstance *> tob_items;
+		if (tob) {
+			for (uint32 ti = 0; ti < cur->second.tier_count && ti < MAX_TRIBUTE_TIERS; ti++) {
+				tob_items.push_back(database.CreateItem(cur->second.tiers[ti].tribute_item_id, 1));
+			}
+		}
+		const uint32 trailer = tob_items.empty() ? 0 : sizeof(uint32) * 2 + tob_items.size() * sizeof(EQ::InternalSerializedItem_Struct);
+
+		EQApplicationPacket outapp(OP_TributeInfo, sizeof(TributeAbility_Struct) + len + 1 + trailer);
 		TributeAbility_Struct* tas = (TributeAbility_Struct*)outapp.pBuffer;
 
 		tas->tribute_id = htonl(cur->first);
-		tas->tier_count = htonl(cur->second.unknown);
+		tas->tier_count = htonl(tob ? cur->second.tier_count : cur->second.unknown); // the ToB encoder trusts the count
 
 		//gotta copy over the data from tiers, and flip all the
 		//byte orders, no idea why its flipped here
@@ -308,7 +321,27 @@ void Client::SendTributes() {
 
 		memcpy(tas->name, cur->second.name.c_str(), len);
 		tas->name[len] = '\0';
+
+		if (trailer) {
+			uchar *w = outapp.pBuffer + sizeof(TributeAbility_Struct) + len + 1;
+			const uint32 magic = 0x49424F54; // TOB_TRIBUTE_ITEMS_MAGIC in common/patches/tob.cpp
+			const uint32 n     = tob_items.size();
+			memcpy(w, &magic, sizeof(magic));
+			memcpy(w + 4, &n, sizeof(n));
+			w += 8;
+			for (auto *inst : tob_items) {
+				EQ::InternalSerializedItem_Struct si{};
+				si.slot_id = 0;
+				si.inst    = inst;
+				memcpy(w, &si, sizeof(si));
+				w += sizeof(si);
+			}
+		}
+
 		QueuePacket(&outapp);
+		for (auto *inst : tob_items) {
+			safe_delete(inst);
+		}
 	}
 }
 
@@ -377,28 +410,65 @@ void Client::SendGuildTributes()
 	for (auto const& t : tribute_list) {
 		if (!t.second.is_guild)
 			continue;	//skip non guild tributes here
+		if (t.first == TRIBUTE_NONE)
+			continue;	//never ship a TRIBUTE_NONE (0xFFFFFFFF) id; it crashes the client
 
 		//guild tribute has an unknown uint32 at its begining, guild ID?
 		int len = t.second.name.length() + 1;
 
-		EQApplicationPacket* outapp = new EQApplicationPacket(OP_SendGuildTributes, sizeof(GuildTributeAbility_Struct) + len);
-		GuildTributeAbility_Struct* gtas = (GuildTributeAbility_Struct*)outapp->pBuffer;
-
-		auto tier_count = t.second.tier_count;
-		for (int ti = 0; ti < t.second.tier_count; ti++) {
+		// tiers above the level cap are left out, and the rest are packed so tier_count matches what is sent
+		std::vector<uint32> tiers;
+		for (uint32 ti = 0; ti < t.second.tier_count && ti < MAX_TRIBUTE_TIERS; ti++) {
 			if (RuleB(Guild, UseCharacterMaxLevelForGuildTributes) && t.second.tiers[ti].level > RuleI(Character, MaxLevel)) {
-				tier_count -= 1;
 				continue;
 			}
-			gtas->guild_id = GuildID();
-			gtas->ability.tier_count = htonl(tier_count);
-			gtas->ability.tribute_id = htonl(t.first);
-			gtas->ability.tiers[ti].cost = htonl(t.second.tiers[ti].cost);
-			gtas->ability.tiers[ti].tribute_item_id = htonl(t.second.tiers[ti].tribute_item_id);
-			gtas->ability.tiers[ti].level = htonl(t.second.tiers[ti].level);
+			tiers.push_back(ti);
 		}
-		strn0cpy(gtas->ability.name, t.second.name.data(), t.second.name.length());
+
+		// ToB names the tiers from full item data: append {magic, n, n x InternalSerializedItem_Struct}
+		// after the name; the tob encoder reads the instances while the packet is queued
+		std::vector<EQ::ItemInstance *> tob_items;
+		if (ClientVersion() >= EQ::versions::ClientVersion::TOB) {
+			for (auto ti : tiers) {
+				tob_items.push_back(database.CreateItem(t.second.tiers[ti].tribute_item_id, 1));
+			}
+		}
+		const uint32 trailer = tob_items.empty() ? 0 : sizeof(uint32) * 2 + tob_items.size() * sizeof(EQ::InternalSerializedItem_Struct);
+
+		EQApplicationPacket* outapp = new EQApplicationPacket(OP_SendGuildTributes, sizeof(GuildTributeAbility_Struct) + len + trailer);
+		GuildTributeAbility_Struct* gtas = (GuildTributeAbility_Struct*)outapp->pBuffer;
+
+		gtas->guild_id           = GuildID();
+		gtas->ability.tier_count = htonl(tiers.size());
+		gtas->ability.tribute_id = htonl(t.first);
+		for (size_t i = 0; i < tiers.size(); i++) {
+			const auto &tier = t.second.tiers[tiers[i]];
+			gtas->ability.tiers[i].cost            = htonl(tier.cost);
+			gtas->ability.tiers[i].tribute_item_id = htonl(tier.tribute_item_id);
+			gtas->ability.tiers[i].level           = htonl(tier.level);
+		}
+		strn0cpy(gtas->ability.name, t.second.name.data(), len);
+
+		if (trailer) {
+			uchar *w = outapp->pBuffer + sizeof(GuildTributeAbility_Struct) + len;
+			const uint32 magic = 0x49424F54; // TOB_TRIBUTE_ITEMS_MAGIC in common/patches/tob.cpp
+			const uint32 n     = tob_items.size();
+			memcpy(w, &magic, sizeof(magic));
+			memcpy(w + 4, &n, sizeof(n));
+			w += 8;
+			for (auto *inst : tob_items) {
+				EQ::InternalSerializedItem_Struct s{};
+				s.slot_id = 0;
+				s.inst    = inst;
+				memcpy(w, &s, sizeof(s));
+				w += sizeof(s);
+			}
+		}
+
 		FastQueuePacket(&outapp);
+		for (auto *inst : tob_items) {
+			safe_delete(inst);
+		}
 	}
 }
 
@@ -430,10 +500,27 @@ void Client::DoGuildTributeUpdate()
 	auto guild = guild_mgr.GetGuildByGuildID(GuildID());
 
 	if (guild && guild->tribute.enabled && GuildTributeOptIn()) {
-		TributeData& d1 = tribute_list[guild->tribute.id_1];
-		uint32 item_id1 = d1.tiers[guild->tribute.id_1_tier].tribute_item_id;
-		TributeData& d2 = tribute_list[guild->tribute.id_2];
-		uint32 item_id2 = d2.tiers[guild->tribute.id_2_tier].tribute_item_id;
+		// IMPORTANT: tribute_list is a process-global map shared by every client in the
+		// zone. Never index it with operator[] using an unchecked key. An unselected
+		// guild tribute slot is TRIBUTE_NONE (0xFFFFFFFF), and operator[] would INSERT a
+		// bogus entry under that key (is_guild=false by default). SendTributes() would
+		// then ship an OP_TributeInfo with tribute_id 0xFFFFFFFF, crashing the RoF2 client
+		// for EVERY player in the zone until restart. Look the entries up safely instead.
+		TributeData* d1 = nullptr;
+		TributeData* d2 = nullptr;
+		uint32 item_id1 = 0;
+		uint32 item_id2 = 0;
+
+		if (guild->tribute.id_1 != TRIBUTE_NONE && tribute_list.count(guild->tribute.id_1) &&
+			guild->tribute.id_1_tier < MAX_TRIBUTE_TIERS) {
+			d1 = &tribute_list[guild->tribute.id_1];
+			item_id1 = d1->tiers[guild->tribute.id_1_tier].tribute_item_id;
+		}
+		if (guild->tribute.id_2 != TRIBUTE_NONE && tribute_list.count(guild->tribute.id_2) &&
+			guild->tribute.id_2_tier < MAX_TRIBUTE_TIERS) {
+			d2 = &tribute_list[guild->tribute.id_2];
+			item_id2 = d2->tiers[guild->tribute.id_2_tier].tribute_item_id;
+		}
 
 		if (item_id1) {
 			LogGuilds("Guild Tribute Item 1 is {}", item_id1);
@@ -442,7 +529,7 @@ void Client::DoGuildTributeUpdate()
 				LogGuilds("Guild Tribute Item 1 was not found. {}", item_id1);
 				return;
 			}
-			auto inst_level = d1.tiers[guild->tribute.id_1_tier].level;
+			auto inst_level = d1->tiers[guild->tribute.id_1_tier].level;
 			if (m_inv[EQ::invslot::GUILD_TRIBUTE_BEGIN]) {
 				LogGuilds("Guild Tribute DELETE Item in Slot 450");
 				DeleteItemInInventory(EQ::invslot::GUILD_TRIBUTE_BEGIN);
@@ -464,7 +551,7 @@ void Client::DoGuildTributeUpdate()
 				LogGuilds("Guild Tribute Item 1 was not found. {}", item_id2);
 				return;
 			}
-			auto inst_level = d2.tiers[guild->tribute.id_2_tier].level;
+			auto inst_level = d2->tiers[guild->tribute.id_2_tier].level;
 			if (m_inv[EQ::invslot::GUILD_TRIBUTE_BEGIN + 1]) {
 				DeleteItemInInventory(EQ::invslot::GUILD_TRIBUTE_BEGIN + 1);
 				LogGuilds("Guild Tribute DELETE Item in Slot 451");

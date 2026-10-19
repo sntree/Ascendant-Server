@@ -1,23 +1,20 @@
-/**
- * EQEmulator: Everquest Server Emulator
- * Copyright (C) 2001-2019 EQEmulator Development Team (https://github.com/EQEmu/Server)
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; version 2 of the License.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY except by those people which sell it, which
- * are required to give you total support for your newly bought product;
- * without even the implied warranty of MERCHANTABILITY or FITNESS FOR
- * A PARTICULAR PURPOSE. See the GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
- *
- */
+/*	EQEmu: EQEmulator
 
+	Copyright (C) 2001-2026 EQEmu Development Team
+
+	This program is free software; you can redistribute it and/or modify
+	it under the terms of the GNU General Public License as published by
+	the Free Software Foundation; either version 3 of the License, or
+	(at your option) any later version.
+
+	This program is distributed in the hope that it will be useful,
+	but WITHOUT ANY WARRANTY; without even the implied warranty of
+	MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+	GNU General Public License for more details.
+
+	You should have received a copy of the GNU General Public License
+	along with this program. If not, see <http://www.gnu.org/licenses/>.
+*/
 #pragma once
 
 #include <vector>
@@ -36,6 +33,8 @@ namespace DatabaseSchema {
 		return {
 			{"adventure_stats",                "player_id"},
 			{"char_recipe_list",               "char_id"},
+			{"character_achievement_components", "character_id"},
+			{"character_achievements",         "character_id"},
 			{"character_activities",           "charid"},
 			{"character_alt_currency",         "char_id"},
 			{"character_alternate_abilities",  "id"},
@@ -71,6 +70,7 @@ namespace DatabaseSchema {
 			{"character_stats_record",         "character_id"},
 			{"character_task_timers",          "character_id"},
 			{"character_tasks",                "charid"},
+			{"character_tradeskill_depot",     "character_id"},
 			{"character_tribute",              "character_id"},
 			{"completed_tasks",                "charid"},
 			{"data_buckets",                   "character_id"},
@@ -103,6 +103,8 @@ namespace DatabaseSchema {
 			"account",
 			"account_ip",
 			"account_flags",
+			"account_marketplace_funds",
+			"account_marketplace_ledger",
 			"account_rewards",
 			"adventure_details",
 			"adventure_stats",
@@ -110,6 +112,8 @@ namespace DatabaseSchema {
 			"buyer_buy_lines",
 			"buyer_trade_items",
 			"char_recipe_list",
+			"character_achievement_components",
+			"character_achievements",
 			"character_activities",
 			"character_alt_currency",
 			"character_alternate_abilities",
@@ -146,6 +150,7 @@ namespace DatabaseSchema {
 			"character_stats_record",
 			"character_task_timers",
 			"character_tasks",
+			"character_tradeskill_depot",
 			"character_tribute",
 			"completed_tasks",
 			"data_buckets",
@@ -189,6 +194,8 @@ namespace DatabaseSchema {
 			"aa_rank_effects",
 			"aa_rank_prereqs",
 			"aa_ranks",
+			"achievement_components",
+			"achievements",
 			"adventure_template",
 			"adventure_template_entry",
 			"adventure_template_entry_flavor",
@@ -222,6 +229,8 @@ namespace DatabaseSchema {
 			"lootdrop_entries",
 			"loottable",
 			"loottable_entries",
+			"marketplace_offers",
+			"marketplace_package_contents",
 			"merchantlist",
 			"npc_emotes",
 			"npc_faction",

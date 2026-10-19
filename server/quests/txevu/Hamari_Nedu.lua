@@ -1,6 +1,6 @@
 local tacvi = "Tacvi, Seat of the Slaver"
 local tacvi_raid = {
-	expedition = { name="Tacvi, Seat of the Slaver", min_players=18, max_players=54 },
+	expedition = { name="Tacvi, Seat of the Slaver", min_players=1, max_players=54 }, -- Ascendant: solo-friendly (live 18)
 	instance   = { zone="tacvi", version=0, duration=eq.seconds("6h") },
 	compass    = { zone="txevu", x=-133.21, y=-210.36, z=-421.04 },
 	safereturn = { zone="txevu", x=-325, y=0, z=-422.12, h=128 },
@@ -27,12 +27,18 @@ function event_say(e)
 		local is_gm = e.other:GetGM();
 
 		if e.other:HasItem(64034) then
-			if not is_gm and e.other:GetRaidMemberCountInZone() < 1 then
+			if false then -- Ascendant: solo-friendly, no raid required
 				e.other:Message(MT.NPCQuestSay, "Hamari Nedu says, 'I'm sorry, but you don't have enough comrades with you to venture into this dangerous area.")
 			elseif not is_gm and e.other:DoesAnyPartyMemberHaveLockout(tacvi, "Replay Timer", 54) then
 				e.other:Message(MT.NPCQuestSay, "Hamari Nedu says, 'I'm afraid I cannot allow you to begin, someone in your party has been on this expedition too recently and cannot yet go again.'")
 			else
 				e.other:Message(MT.NPCQuestSay, "Hamari Nedu says, 'Place your hands on one of the altars behind me and the way will be revealed. Be wary for you are about to encounter some of the most vicious trusik known. If for any reason you wish to return, place your hands on the golem within the temple.'");
+				-- Ascendant: a character can only be in one expedition (e.g. a Planeshifter Tyrael DZ)
+				local current_dz = e.other:GetExpedition()
+				if current_dz.valid then
+					e.other:Message(MT.Yellow, "You are already in the expedition [" .. current_dz:GetName() .. "]. Leave it first (/dzquit), then ask again.")
+					return
+				end
 				local dz = e.other:CreateExpedition(tacvi_raid)
 			end
 		end

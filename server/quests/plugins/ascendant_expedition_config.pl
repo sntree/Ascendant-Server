@@ -10,6 +10,7 @@ use warnings;
 # default_name: Display name for the zone
 # entry_override: {x, y, z, h} — custom zone-in point inside the DZ (optional)
 # has_raid_tier: 1 if zone offers the "Raid Expedition" option
+# raid_only: 1 if the zone offers ONLY the Raid Expedition (every boss is a raid target)
 my %expedition_zones = (
     # ---- Classic ----
     'fearplane' => {
@@ -362,6 +363,99 @@ my %expedition_zones = (
         zone_version => 0,
         default_name => 'The Lair of Terris Thule',
         has_raid_tier => 1
+    },
+
+    # ---- Legacy of Ykesha ----
+    # Raid tier only where the zone has raid_target bosses:
+    # nadox (Broodmother, Innoruuk), hatesfury (Captain Krasnok),
+    # chardokb (Korucust). Varns (dulak) and Culthor (soldungc) are
+    # rare_spawn nameds, so those zones have no raid tier.
+    'nedaria' => {
+        zone_version => 0,
+        default_name => "Nedaria's Landing"
+    },
+    'gunthak' => {
+        zone_version => 0,
+        default_name => 'The Gulf of Gunthak'
+    },
+    'dulak' => {
+        zone_version => 0,
+        default_name => "Dulak's Harbor"
+    },
+    'torgiran' => {
+        zone_version => 0,
+        default_name => 'The Torgiran Mines'
+    },
+    'nadox' => {
+        zone_version => 0,
+        default_name => 'The Crypt of Nadox',
+        has_raid_tier => 1
+    },
+    'hatesfury' => {
+        zone_version => 0,
+        default_name => "Hate's Fury, The Scorned Maiden",
+        has_raid_tier => 1
+    },
+    'chardokb' => {
+        zone_version => 0,
+        default_name => 'Chardok: The Halls of Betrayal',
+        has_raid_tier => 1
+    },
+    'soldungc' => {
+        zone_version => 0,
+        default_name => 'The Caverns of Exile'
+    },
+
+    # ---- Gates of Discord ----
+    # Raid tier where the zone has raid_target bosses (2026_09_26_god_named_flags.sql).
+    # qvic / txevu are raid_only (owner 2026-09-26). NOT here (own DZ/instance scripts):
+    # uqua, ikkinz, inktuta, tacvi, snpool/snlair/snplant/sncrematory, vxed, tipt; abysmal hub.
+    'natimbi' => {  # Cragbeast Queen
+        zone_version => 0,
+        default_name => 'Natimbi, the Broken Shores',
+        has_raid_tier => 1
+    },
+    'qinimi' => {  # Mastruq Commander Gorlakt, Spiritlords, Pixtt Xictic Krvne, Mass of Stone, Kabeka Kret
+        zone_version => 0,
+        default_name => 'Qinimi, Court of Nihilia',
+        has_raid_tier => 1
+    },
+    'riwwi' => {  # Taskmistress Krisz
+        zone_version => 0,
+        default_name => 'Riwwi, Coliseum of Games',
+        has_raid_tier => 1
+    },
+    'barindu' => {  # Colossus of War, Ikaav Ixvet Pox
+        zone_version => 0,
+        default_name => 'Barindu, Hanging Gardens',
+        has_raid_tier => 1
+    },
+    'ferubi' => {  # Packmaster Skoiat Pizak, Zun`Muram Votal, Smith Rondo event
+        zone_version => 0,
+        default_name => 'Ferubi, Forgotten Temple of Taelosia',
+        has_raid_tier => 1
+    },
+    'kodtaz' => {  # Pixtt Nemis, Summoning Circle, Ageless Relic Protectors
+        zone_version => 0,
+        default_name => 'Kod\'Taz, Broken Trial Grounds',
+        has_raid_tier => 1
+    },
+    'yxtta' => {  # Primals, Pixtt Suir Mindrider
+        zone_version => 0,
+        default_name => 'Yxtta, Pulpit of Exiles',
+        has_raid_tier => 1
+    },
+    'qvic' => {  # every boss is a raid target
+        zone_version => 0,
+        default_name => 'Qvic, Prayer Grounds of Calling',
+        has_raid_tier => 1,
+        raid_only => 1
+    },
+    'txevu' => {  # every boss is a raid target
+        zone_version => 0,
+        default_name => 'Txevu, Lair of the Elite',
+        has_raid_tier => 1,
+        raid_only => 1
     }
 );
 
@@ -378,6 +472,13 @@ sub GetExpeditionConfig {
         zone_version => 0,
         default_name => quest::GetZoneLongName($zone_name)
     };
+}
+
+sub IsRaidOnly {
+    my $zone_name = shift;
+
+    my $config = GetExpeditionConfig($zone_name);
+    return ($config->{raid_only} && $config->{raid_only} == 1) ? 1 : 0;
 }
 
 sub HasRaidTier {

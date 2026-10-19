@@ -1,3 +1,20 @@
+/*	EQEmu: EQEmulator
+
+	Copyright (C) 2001-2026 EQEmu Development Team
+
+	This program is free software; you can redistribute it and/or modify
+	it under the terms of the GNU General Public License as published by
+	the Free Software Foundation; either version 3 of the License, or
+	(at your option) any later version.
+
+	This program is distributed in the hope that it will be useful,
+	but WITHOUT ANY WARRANTY; without even the implied warranty of
+	MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+	GNU General Public License for more details.
+
+	You should have received a copy of the GNU General Public License
+	along with this program. If not, see <http://www.gnu.org/licenses/>.
+*/
 #ifdef LUA_EQEMU
 
 #include "lua_client.h"
@@ -630,7 +647,7 @@ uint16 Lua_Client::FindMemmedSpellBySlot(int slot) {
 	return self->FindMemmedSpellBySlot(slot);
 }
 
-int Lua_Client::FindMemmedSpellBySpellID(uint16 spell_id) {
+int Lua_Client::FindMemmedSpellBySpellID(int32 spell_id) {
 	Lua_Safe_Call_Int();
 	return self->FindMemmedSpellBySpellID(spell_id);
 }
@@ -1066,7 +1083,7 @@ bool Lua_Client::UseDiscipline(int spell_id, int target_id) {
 	return self->UseDiscipline(spell_id, target_id);
 }
 
-bool Lua_Client::HasDisciplineLearned(uint16 spell_id) {
+bool Lua_Client::HasDisciplineLearned(int32 spell_id) {
 	Lua_Safe_Call_Bool();
 	return self->HasDisciplineLearned(spell_id);
 }
@@ -1360,7 +1377,7 @@ int Lua_Client::GetNextAvailableSpellBookSlot() {
 	return self->GetNextAvailableSpellBookSlot();
 }
 
-uint32 Lua_Client::GetSpellIDByBookSlot(int slot_id) {
+int32 Lua_Client::GetSpellIDByBookSlot(int slot_id) {
 	Lua_Safe_Call_Int();
 	return self->GetSpellIDByBookSlot(slot_id);
 }
@@ -2303,12 +2320,12 @@ int16 Lua_Client::GetGMStatus() {
 	return self->Admin();
 }
 
-void Lua_Client::UntrainDiscBySpellID(uint16 spell_id) {
+void Lua_Client::UntrainDiscBySpellID(int32 spell_id) {
 	Lua_Safe_Call_Void();
 	self->UntrainDiscBySpellID(spell_id);
 }
 
-void Lua_Client::UntrainDiscBySpellID(uint16 spell_id, bool update_client) {
+void Lua_Client::UntrainDiscBySpellID(int32 spell_id, bool update_client) {
 	Lua_Safe_Call_Void();
 	self->UntrainDiscBySpellID(spell_id, update_client);
 }
@@ -2405,17 +2422,17 @@ void Lua_Client::ResetAllCastbarCooldowns() {
 	self->ResetAllCastbarCooldowns();
 }
 
-void Lua_Client::ResetCastbarCooldownBySpellID(uint32 spell_id) {
+void Lua_Client::ResetCastbarCooldownBySpellID(int32 spell_id) {
 	Lua_Safe_Call_Void();
 	self->ResetCastbarCooldownBySpellID(spell_id);
 }
 
-void Lua_Client::UnscribeSpellBySpellID(uint16 spell_id) {
+void Lua_Client::UnscribeSpellBySpellID(int32 spell_id) {
 	Lua_Safe_Call_Void();
 	self->UnscribeSpellBySpellID(spell_id);
 }
 
-void Lua_Client::UnscribeSpellBySpellID(uint16 spell_id, bool update_client) {
+void Lua_Client::UnscribeSpellBySpellID(int32 spell_id, bool update_client) {
 	Lua_Safe_Call_Void();
 	self->UnscribeSpellBySpellID(spell_id, update_client);
 }
@@ -3625,6 +3642,160 @@ luabind::object Lua_Client::GetKeyRing(lua_State* L)
 	return lua_table;
 }
 
+bool Lua_Client::IsKeyRingUnlocked(int ring)
+{
+	Lua_Safe_Call_Bool();
+	return self->IsKeyRingUnlocked(ring);
+}
+
+void Lua_Client::UnlockKeyRing(int ring)
+{
+	Lua_Safe_Call_Void();
+	self->SetKeyRingUnlocked(ring, true);
+}
+
+void Lua_Client::LockKeyRing(int ring)
+{
+	Lua_Safe_Call_Void();
+	self->SetKeyRingUnlocked(ring, false);
+}
+
+bool Lua_Client::AddItemToKeyRing(uint32 item_id)
+{
+	Lua_Safe_Call_Bool();
+	return self->AddItemToKeyRing(item_id);
+}
+
+bool Lua_Client::RemoveItemFromKeyRing(uint32 item_id)
+{
+	Lua_Safe_Call_Bool();
+	return self->RemoveItemFromKeyRing(item_id);
+}
+
+luabind::object Lua_Client::GetKeyRingItems(lua_State* L, int ring)
+{
+	auto lua_table = luabind::newtable(L);
+
+	if (d_) {
+		auto self  = reinterpret_cast<NativeType *>(d_);
+		int  index = 1;
+		for (const auto item_id : self->GetKeyRingItemIDs(ring)) {
+			lua_table[index] = item_id;
+			index++;
+		}
+	}
+
+	return lua_table;
+}
+
+bool Lua_Client::AddItemToOverflow(uint32 item_id)
+{
+	Lua_Safe_Call_Bool();
+	return self->AddItemToOverflow(item_id);
+}
+
+bool Lua_Client::AddItemToOverflow(uint32 item_id, int16 charges)
+{
+	Lua_Safe_Call_Bool();
+	return self->AddItemToOverflow(item_id, charges);
+}
+
+int Lua_Client::GetItemOverflowCount()
+{
+	Lua_Safe_Call_Int();
+	return self->GetItemOverflowCount();
+}
+
+bool Lua_Client::CompleteAchievement(uint32 achievement_id)
+{
+	Lua_Safe_Call_Bool();
+	return self->CompleteAchievement(achievement_id);
+}
+
+uint32 Lua_Client::GetAchievementComponentProgress(uint32 achievement_id, uint32 component_id)
+{
+	Lua_Safe_Call_Int();
+	return self->GetAchievementComponentProgress(achievement_id, component_id);
+}
+
+bool Lua_Client::IsAchievementCompleted(uint32 achievement_id)
+{
+	Lua_Safe_Call_Bool();
+	return self->IsAchievementCompleted(achievement_id);
+}
+
+bool Lua_Client::ResetAchievement(uint32 achievement_id)
+{
+	Lua_Safe_Call_Bool();
+	return self->ResetAchievement(achievement_id);
+}
+
+bool Lua_Client::UpdateAchievementComponent(uint32 achievement_id, uint32 component_id, uint32 amount)
+{
+	Lua_Safe_Call_Bool();
+	return self->UpdateAchievementComponent(achievement_id, component_id, amount);
+}
+
+bool Lua_Client::AddMarketplaceCoins(uint32 amount)
+{
+	Lua_Safe_Call_Bool();
+	return self->AddMarketplaceCoins(amount);
+}
+
+bool Lua_Client::AddMarketplaceCoins(uint32 amount, std::string note)
+{
+	Lua_Safe_Call_Bool();
+	return self->AddMarketplaceCoins(amount, "quest", note);
+}
+
+uint32 Lua_Client::GetMarketplaceCoins()
+{
+	Lua_Safe_Call_Int();
+	return self->GetMarketplaceCoins();
+}
+
+bool Lua_Client::RemoveMarketplaceCoins(uint32 amount)
+{
+	Lua_Safe_Call_Bool();
+	return self->RemoveMarketplaceCoins(amount);
+}
+
+bool Lua_Client::RemoveMarketplaceCoins(uint32 amount, std::string note)
+{
+	Lua_Safe_Call_Bool();
+	return self->RemoveMarketplaceCoins(amount, "quest", note);
+}
+
+bool Lua_Client::SetMarketplaceCoins(uint32 amount)
+{
+	Lua_Safe_Call_Bool();
+	return self->SetMarketplaceCoins(amount);
+}
+
+bool Lua_Client::SetMarketplaceCoins(uint32 amount, std::string note)
+{
+	Lua_Safe_Call_Bool();
+	return self->SetMarketplaceCoins(amount, "quest", note);
+}
+
+bool Lua_Client::AddTradeskillDepotItem(uint32 item_id, uint32 quantity)
+{
+	Lua_Safe_Call_Bool();
+	return self->AddTradeskillDepotItem(item_id, quantity);
+}
+
+uint32 Lua_Client::GetTradeskillDepotQuantity(uint32 item_id)
+{
+	Lua_Safe_Call_Int();
+	return self->GetTradeskillDepotQuantity(item_id);
+}
+
+bool Lua_Client::RemoveTradeskillDepotItem(uint32 item_id, uint32 quantity)
+{
+	Lua_Safe_Call_Bool();
+	return self->RemoveTradeskillDepotItem(item_id, quantity);
+}
+
 luabind::scope lua_register_client() {
 	return luabind::class_<Lua_Client, Lua_Mob>("Client")
 	.def(luabind::constructor<>())
@@ -3647,6 +3818,8 @@ luabind::scope lua_register_client() {
 	.def("AddLevelBasedExp", (void(Lua_Client::*)(int))&Lua_Client::AddLevelBasedExp)
 	.def("AddLevelBasedExp", (void(Lua_Client::*)(int,int))&Lua_Client::AddLevelBasedExp)
 	.def("AddLevelBasedExp", (void(Lua_Client::*)(int,int,bool))&Lua_Client::AddLevelBasedExp)
+	.def("AddMarketplaceCoins", (bool(Lua_Client::*)(uint32))&Lua_Client::AddMarketplaceCoins)
+	.def("AddMarketplaceCoins", (bool(Lua_Client::*)(uint32,std::string))&Lua_Client::AddMarketplaceCoins)
 	.def("AddMoneyToPP", (void(Lua_Client::*)(uint32,uint32,uint32,uint32))&Lua_Client::AddMoneyToPP)
 	.def("AddMoneyToPP", (void(Lua_Client::*)(uint32,uint32,uint32,uint32,bool))&Lua_Client::AddMoneyToPP)
 	.def("AddPlatinum", (void(Lua_Client::*)(uint32))&Lua_Client::AddPlatinum)
@@ -3654,6 +3827,7 @@ luabind::scope lua_register_client() {
 	.def("AddPVPPoints", (void(Lua_Client::*)(uint32))&Lua_Client::AddPVPPoints)
 	.def("AddRadiantCrystals", (void(Lua_Client::*)(uint32))&Lua_Client::AddRadiantCrystals)
 	.def("AddSkill", (void(Lua_Client::*)(int,int))&Lua_Client::AddSkill)
+	.def("AddTradeskillDepotItem", (bool(Lua_Client::*)(uint32,uint32))&Lua_Client::AddTradeskillDepotItem)
 	.def("Admin", (int16(Lua_Client::*)(void))&Lua_Client::Admin)
 	.def("ApplySpell", (void(Lua_Client::*)(int))&Lua_Client::ApplySpell)
 	.def("ApplySpell", (void(Lua_Client::*)(int,int))&Lua_Client::ApplySpell)
@@ -3704,6 +3878,7 @@ luabind::scope lua_register_client() {
 	.def("ClearPEQZoneFlag", (void(Lua_Client::*)(uint32))&Lua_Client::ClearPEQZoneFlag)
 	.def("ClearXTargets", (void(Lua_Client::*)(void))&Lua_Client::ClearXTargets)
 	.def("ClearZoneFlag", (void(Lua_Client::*)(uint32))&Lua_Client::ClearZoneFlag)
+	.def("CompleteAchievement", (bool(Lua_Client::*)(uint32))&Lua_Client::CompleteAchievement)
 	.def("CompleteTask", (bool(Lua_Client::*)(int))&Lua_Client::CompleteTask)
 	.def("Connected", (bool(Lua_Client::*)(void))&Lua_Client::Connected)
 	.def("CountAugmentEquippedByID", (uint32(Lua_Client::*)(uint32))&Lua_Client::CountAugmentEquippedByID)
@@ -3743,7 +3918,7 @@ luabind::scope lua_register_client() {
 	.def("FilteredMessage", &Lua_Client::FilteredMessage)
 	.def("FindEmptyMemSlot", (int(Lua_Client::*)(void))&Lua_Client::FindEmptyMemSlot)
 	.def("FindMemmedSpellBySlot", (uint16(Lua_Client::*)(int))&Lua_Client::FindMemmedSpellBySlot)
-	.def("FindMemmedSpellBySpellID", (int(Lua_Client::*)(uint16))&Lua_Client::FindMemmedSpellBySpellID)
+	.def("FindMemmedSpellBySpellID", (int(Lua_Client::*)(int32 ))&Lua_Client::FindMemmedSpellBySpellID)
 	.def("FindSpellBookSlotBySpellID", (int(Lua_Client::*)(int))&Lua_Client::FindSpellBookSlotBySpellID)
 	.def("Fling", (void(Lua_Client::*)(float,float,float))&Lua_Client::Fling)
 	.def("Fling", (void(Lua_Client::*)(float,float,float,bool))&Lua_Client::Fling)
@@ -3765,6 +3940,7 @@ luabind::scope lua_register_client() {
 	.def("GetAccountAge", (int(Lua_Client::*)(void))&Lua_Client::GetAccountAge)
 	.def("GetAccountFlag", (std::string(Lua_Client::*)(const std::string&))&Lua_Client::GetAccountFlag)
 	.def("GetAccountFlags", (luabind::object(Lua_Client::*)(lua_State*))&Lua_Client::GetAccountFlags)
+	.def("GetAchievementComponentProgress", (uint32(Lua_Client::*)(uint32,uint32))&Lua_Client::GetAchievementComponentProgress)
 	.def("GetAggroCount", (uint32(Lua_Client::*)(void))&Lua_Client::GetAggroCount)
 	.def("GetAllMoney", (uint64(Lua_Client::*)(void))&Lua_Client::GetAllMoney)
 	.def("GetAlternateCurrencyValue", (uint32(Lua_Client::*)(uint32))&Lua_Client::GetAlternateCurrencyValue)
@@ -3867,6 +4043,7 @@ luabind::scope lua_register_client() {
 	.def("GetLearnableDisciplines", (luabind::object(Lua_Client::*)(lua_State* L,uint8,uint8))&Lua_Client::GetLearnableDisciplines)
 	.def("GetLearnedDisciplines", (luabind::object(Lua_Client::*)(lua_State* L))&Lua_Client::GetLearnedDisciplines)
 	.def("GetLockoutExpeditionUUID", (std::string(Lua_Client::*)(std::string, std::string))&Lua_Client::GetLockoutExpeditionUUID)
+	.def("GetMarketplaceCoins", (uint32(Lua_Client::*)(void))&Lua_Client::GetMarketplaceCoins)
 	.def("GetMaxEndurance", (int(Lua_Client::*)(void))&Lua_Client::GetMaxEndurance)
 	.def("GetMemmedSpells", (luabind::object(Lua_Client::*)(lua_State* L))&Lua_Client::GetMemmedSpells)
 	.def("GetModCharacterFactionLevel", (int(Lua_Client::*)(int))&Lua_Client::GetModCharacterFactionLevel)
@@ -3897,7 +4074,7 @@ luabind::scope lua_register_client() {
 	.def("GetSkillPoints", (int(Lua_Client::*)(void))&Lua_Client::GetSkillPoints)
 	.def("GetSkillTrainLevel", (uint8(Lua_Client::*)(int))&Lua_Client::GetSkillTrainLevel)
 	.def("GetSpellDamage", (int(Lua_Client::*)(void))&Lua_Client::GetSpellDamage)
-	.def("GetSpellIDByBookSlot", (uint32(Lua_Client::*)(int))&Lua_Client::GetSpellIDByBookSlot)
+	.def("GetSpellIDByBookSlot", (int32 (Lua_Client::*)(int))&Lua_Client::GetSpellIDByBookSlot)
 	.def("GetSpentAA", (int(Lua_Client::*)(void))&Lua_Client::GetSpentAA)
 	.def("GetStartZone", (int(Lua_Client::*)(void))&Lua_Client::GetStartZone)
 	.def("GetTargetRingX", (float(Lua_Client::*)(void))&Lua_Client::GetTargetRingX)
@@ -3905,6 +4082,7 @@ luabind::scope lua_register_client() {
 	.def("GetTargetRingZ", (float(Lua_Client::*)(void))&Lua_Client::GetTargetRingZ)
 	.def("GetThirst", (int(Lua_Client::*)(void))&Lua_Client::GetThirst)
 	.def("GetTotalSecondsPlayed", (uint32(Lua_Client::*)(void))&Lua_Client::GetTotalSecondsPlayed)
+	.def("GetTradeskillDepotQuantity", (uint32(Lua_Client::*)(uint32))&Lua_Client::GetTradeskillDepotQuantity)
 	.def("GetWeight", (int(Lua_Client::*)(void))&Lua_Client::GetWeight)
 	.def("GetPEQZoneFlags", (luabind::object(Lua_Client::*)(lua_State*))&Lua_Client::GetPEQZoneFlags)
 	.def("GetZoneFlags", (luabind::object(Lua_Client::*)(lua_State*))&Lua_Client::GetZoneFlags)
@@ -3935,6 +4113,7 @@ luabind::scope lua_register_client() {
 	.def("IncreaseSkill", (void(Lua_Client::*)(int))&Lua_Client::IncreaseSkill)
 	.def("IncreaseSkill", (void(Lua_Client::*)(int,int))&Lua_Client::IncreaseSkill)
 	.def("IncrementAA", (void(Lua_Client::*)(int))&Lua_Client::IncrementAA)
+	.def("IsAchievementCompleted", (bool(Lua_Client::*)(uint32))&Lua_Client::IsAchievementCompleted)
 	.def("IsAutoAttackEnabled", (bool(Lua_Client::*)(void))&Lua_Client::IsAutoAttackEnabled)
 	.def("IsAutoFireEnabled", (bool(Lua_Client::*)(void))&Lua_Client::IsAutoFireEnabled)
 	.def("IsCrouching", (bool(Lua_Client::*)(void))&Lua_Client::IsCrouching)
@@ -3953,6 +4132,15 @@ luabind::scope lua_register_client() {
 	.def("IsTaskActivityActive", (bool(Lua_Client::*)(int,int))&Lua_Client::IsTaskActivityActive)
 	.def("IsTaskCompleted", (bool(Lua_Client::*)(int))&Lua_Client::IsTaskCompleted)
 	.def("KeyRingAdd", (bool(Lua_Client::*)(uint32))&Lua_Client::KeyRingAdd)
+	.def("IsKeyRingUnlocked", (bool(Lua_Client::*)(int))&Lua_Client::IsKeyRingUnlocked)
+	.def("UnlockKeyRing", (void(Lua_Client::*)(int))&Lua_Client::UnlockKeyRing)
+	.def("LockKeyRing", (void(Lua_Client::*)(int))&Lua_Client::LockKeyRing)
+	.def("AddItemToKeyRing", (bool(Lua_Client::*)(uint32))&Lua_Client::AddItemToKeyRing)
+	.def("RemoveItemFromKeyRing", (bool(Lua_Client::*)(uint32))&Lua_Client::RemoveItemFromKeyRing)
+	.def("GetKeyRingItems", (luabind::object(Lua_Client::*)(lua_State*,int))&Lua_Client::GetKeyRingItems)
+	.def("AddItemToOverflow", (bool(Lua_Client::*)(uint32))&Lua_Client::AddItemToOverflow)
+	.def("AddItemToOverflow", (bool(Lua_Client::*)(uint32,int16))&Lua_Client::AddItemToOverflow)
+	.def("GetItemOverflowCount", (int(Lua_Client::*)(void))&Lua_Client::GetItemOverflowCount)
 	.def("KeyRingCheck", (bool(Lua_Client::*)(uint32))&Lua_Client::KeyRingCheck)
 	.def("KeyRingClear", (bool(Lua_Client::*)(void))&Lua_Client::KeyRingClear)
 	.def("KeyRingList", (void(Lua_Client::*)(void))&Lua_Client::KeyRingList)
@@ -4042,13 +4230,17 @@ luabind::scope lua_register_client() {
 	.def("RemoveItem", (void(Lua_Client::*)(uint32,uint32))&Lua_Client::RemoveItem)
 	.def("RemoveLDoNLoss", (void(Lua_Client::*)(uint32))&Lua_Client::RemoveLDoNLoss)
 	.def("RemoveLDoNWin", (void(Lua_Client::*)(uint32))&Lua_Client::RemoveLDoNWin)
+	.def("RemoveMarketplaceCoins", (bool(Lua_Client::*)(uint32))&Lua_Client::RemoveMarketplaceCoins)
+	.def("RemoveMarketplaceCoins", (bool(Lua_Client::*)(uint32,std::string))&Lua_Client::RemoveMarketplaceCoins)
 	.def("RemoveRadiantCrystals", (void(Lua_Client::*)(uint32))&Lua_Client::RemoveRadiantCrystals)
+	.def("RemoveTradeskillDepotItem", (bool(Lua_Client::*)(uint32,uint32))&Lua_Client::RemoveTradeskillDepotItem)
 	.def("ResetAA", (void(Lua_Client::*)(void))&Lua_Client::ResetAA)
+	.def("ResetAchievement", (bool(Lua_Client::*)(uint32))&Lua_Client::ResetAchievement)
 	.def("ResetAllDisciplineTimers", (void(Lua_Client::*)(void))&Lua_Client::ResetAllDisciplineTimers)
 	.def("ResetAllCastbarCooldowns", (void(Lua_Client::*)(void))&Lua_Client::ResetAllCastbarCooldowns)
 	.def("ResetAlternateAdvancementRank", &Lua_Client::ResetAlternateAdvancementRank)
 	.def("ResetCastbarCooldownBySlot", (void(Lua_Client::*)(int))&Lua_Client::ResetCastbarCooldownBySlot)
-	.def("ResetCastbarCooldownBySpellID", (void(Lua_Client::*)(uint32))&Lua_Client::ResetCastbarCooldownBySpellID)
+	.def("ResetCastbarCooldownBySpellID", (void(Lua_Client::*)(int32 ))&Lua_Client::ResetCastbarCooldownBySpellID)
 	.def("ResetDisciplineTimer", (void(Lua_Client::*)(uint32))&Lua_Client::ResetDisciplineTimer)
 	.def("ResetItemCooldown", (void(Lua_Client::*)(uint32))&Lua_Client::ResetItemCooldown)
 	.def("ResetLeadershipAA", (void(Lua_Client::*)(void))&Lua_Client::ResetLeadershipAA)
@@ -4136,6 +4328,8 @@ luabind::scope lua_register_client() {
 	.def("SetItemCooldown", (void(Lua_Client::*)(uint32,uint32))&Lua_Client::SetItemCooldown)
 	.def("SetLanguageSkill", (void(Lua_Client::*)(int,int))&Lua_Client::SetLanguageSkill)
 	.def("SetLDoNPoints", (void(Lua_Client::*)(uint32,uint32))&Lua_Client::SetLDoNPoints)
+	.def("SetMarketplaceCoins", (bool(Lua_Client::*)(uint32))&Lua_Client::SetMarketplaceCoins)
+	.def("SetMarketplaceCoins", (bool(Lua_Client::*)(uint32,std::string))&Lua_Client::SetMarketplaceCoins)
 	.def("SetMaterial", (void(Lua_Client::*)(int,uint32))&Lua_Client::SetMaterial)
 	.def("SetPEQZoneFlag", (void(Lua_Client::*)(uint32))&Lua_Client::SetPEQZoneFlag)
 	.def("SetPVP", (void(Lua_Client::*)(bool))&Lua_Client::SetPVP)
@@ -4212,14 +4406,15 @@ luabind::scope lua_register_client() {
 	.def("UnscribeSpell", (void(Lua_Client::*)(int,bool))&Lua_Client::UnscribeSpell)
 	.def("UnscribeSpellAll", (void(Lua_Client::*)(bool))&Lua_Client::UnscribeSpellAll)
 	.def("UnscribeSpellAll", (void(Lua_Client::*)(void))&Lua_Client::UnscribeSpellAll)
-	.def("UnscribeSpellBySpellID", (void(Lua_Client::*)(uint16))&Lua_Client::UnscribeSpellBySpellID)
-	.def("UnscribeSpellBySpellID", (void(Lua_Client::*)(uint16,bool))&Lua_Client::UnscribeSpellBySpellID)
+	.def("UnscribeSpellBySpellID", (void(Lua_Client::*)(int32 ))&Lua_Client::UnscribeSpellBySpellID)
+	.def("UnscribeSpellBySpellID", (void(Lua_Client::*)(int32 ,bool))&Lua_Client::UnscribeSpellBySpellID)
 	.def("UntrainDisc", (void(Lua_Client::*)(int))&Lua_Client::UntrainDisc)
 	.def("UntrainDisc", (void(Lua_Client::*)(int,bool))&Lua_Client::UntrainDisc)
 	.def("UntrainDiscAll", (void(Lua_Client::*)(bool))&Lua_Client::UntrainDiscAll)
 	.def("UntrainDiscAll", (void(Lua_Client::*)(void))&Lua_Client::UntrainDiscAll)
-	.def("UntrainDiscBySpellID", (void(Lua_Client::*)(uint16))&Lua_Client::UntrainDiscBySpellID)
-	.def("UntrainDiscBySpellID", (void(Lua_Client::*)(uint16,bool))&Lua_Client::UntrainDiscBySpellID)
+	.def("UntrainDiscBySpellID", (void(Lua_Client::*)(int32 ))&Lua_Client::UntrainDiscBySpellID)
+	.def("UntrainDiscBySpellID", (void(Lua_Client::*)(int32 ,bool))&Lua_Client::UntrainDiscBySpellID)
+	.def("UpdateAchievementComponent", (bool(Lua_Client::*)(uint32,uint32,uint32))&Lua_Client::UpdateAchievementComponent)
 	.def("UpdateAdmin", (void(Lua_Client::*)(void))&Lua_Client::UpdateAdmin)
 	.def("UpdateAdmin", (void(Lua_Client::*)(bool))&Lua_Client::UpdateAdmin)
 	.def("UpdateGroupAAs", (void(Lua_Client::*)(int,uint32))&Lua_Client::UpdateGroupAAs)

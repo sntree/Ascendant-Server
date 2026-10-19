@@ -1,11 +1,19 @@
 -- everfrost\Magus_Delin.lua NPCID 30088
 
 function event_say(e)
+	-- Ascendant: Nedaria's Landing only once Legacy of Ykesha is live (GMs always see it)
+	local is_gm = (e.other:Admin() > 80 and e.other:GetGM());
+	local nedaria_open = eq.is_the_legacy_of_ykesha_enabled() or is_gm;
+	local nedaria_link = nedaria_open and ("[" .. eq.say_link("Nedaria's Landing",false,"Nedaria's Landing") .. "], ") or "";
+	local nedaria_offer = nedaria_open and ("  I have enough time to send you to [" .. eq.say_link("Nedaria's Landing") .. "], if you'd like.") or "";
+
 	--Adventurers Stone
 	if(e.other:KeyRingCheck(741000) or e.other:HasItem(741000)) then
 		if(e.message:findi("hail")) then
-			e.self:Say("You're going to need to have a fair amount of faith in me and my friends.  I make it a policy to tell all of the travelers that come to me that this is not a perfected magic and probably never will be.  The magic we are using is, in my opinion, not of Norrathian origins.  Or perhaps I'm simply an eccentric who hopes there is a greater force out there that is granting us the use of new magics.  Anyway, enough chatter.  Tell me where you would like to go and I will send you there.  I can send you to any of the other camps in [" .. eq.say_link("Butcherblock",false,"Butcherblock") .. "], [" .. eq.say_link("Commonlands",false,"Commonlands") .. "], [" .. eq.say_link("North Ro",false,"North Ro") .. "], or [" .. eq.say_link("South Ro",false,"South Ro") .. "].  Please be still as I do this.");
+			e.self:Say("You're going to need to have a fair amount of faith in me and my friends.  I make it a policy to tell all of the travelers that come to me that this is not a perfected magic and probably never will be.  The magic we are using is, in my opinion, not of Norrathian origins.  Or perhaps I'm simply an eccentric who hopes there is a greater force out there that is granting us the use of new magics.  Anyway, enough chatter.  Tell me where you would like to go and I will send you there.  I can send you to any of the other camps in [" .. eq.say_link("Butcherblock",false,"Butcherblock") .. "], [" .. eq.say_link("Commonlands",false,"Commonlands") .. "], " .. nedaria_link .. "[" .. eq.say_link("North Ro",false,"North Ro") .. "], or [" .. eq.say_link("South Ro",false,"South Ro") .. "].  Please be still as I do this.");
 		
+		elseif(e.message:findi("nedaria") and nedaria_open) then
+			e.self:CastSpell(4580,e.other:GetID(),0,1); -- Spell: Teleport: Nedaria
 		elseif(e.message:findi("butcherblock")) then
 			e.self:CastSpell(4179,e.other:GetID(),0,1); -- Spell: Teleport: Butcherblock
 		elseif(e.message:findi("north ro")) then
@@ -20,7 +28,9 @@ function event_say(e)
 		end
 	else --no Adventurers Stone
 		if(e.message:findi("hail")) then
-			e.self:Say("You will have to excuse me, I am quite busy studying this Farstone and the possibility of using the magic stored inside of it.  Perhaps you should talk to those at the Wayfarer camps to see if they have any use for you.");
+			e.self:Say("You will have to excuse me, I am quite busy studying this Farstone and the possibility of using the magic stored inside of it.  Perhaps you should talk to those at the Wayfarer camps to see if they have any use for you." .. nedaria_offer);
+		elseif(e.message:findi("nedaria") and nedaria_open) then
+			e.self:CastSpell(4580,e.other:GetID(),0,1); -- Spell: Teleport: Nedaria
 		end
 	end
 end

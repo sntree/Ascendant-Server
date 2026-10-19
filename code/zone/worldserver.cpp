@@ -1,26 +1,26 @@
-/*	EQEMu: Everquest Server Emulator
-Copyright (C) 2001-2016 EQEMu Development Team (http://eqemu.org)
+/*	EQEmu: EQEmulator
 
-This program is free software; you can redistribute it and/or modify
-it under the terms of the GNU General Public License as published by
-the Free Software Foundation; version 2 of the License.
+	Copyright (C) 2001-2026 EQEmu Development Team
 
-This program is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY except by those people which sell it, which
-are required to give you total support for your newly bought product;
-without even the implied warranty of MERCHANTABILITY or FITNESS FOR
-A PARTICULAR PURPOSE. See the GNU General Public License for more details.
+	This program is free software; you can redistribute it and/or modify
+	it under the terms of the GNU General Public License as published by
+	the Free Software Foundation; either version 3 of the License, or
+	(at your option) any later version.
 
-You should have received a copy of the GNU General Public License
-along with this program; if not, write to the Free Software
-Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
+	This program is distributed in the hope that it will be useful,
+	but WITHOUT ANY WARRANTY; without even the implied warranty of
+	MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+	GNU General Public License for more details.
+
+	You should have received a copy of the GNU General Public License
+	along with this program. If not, see <http://www.gnu.org/licenses/>.
 */
-
 #include "worldserver.h"
 
 #include "common/eq_packet_structs.h"
 #include "common/events/player_event_logs.h"
 #include "common/inventory_profile.h"
+#include "common/marketplace.h"
 #include "common/misc_functions.h"
 #include "common/patches/patches.h"
 #include "common/profanity_manager.h"
@@ -553,7 +553,7 @@ void WorldServer::HandleMessage(uint16 opcode, const EQ::Net::Packet &p)
 		SerializeBuffer buf(100);
 		buf.WriteString(smotd->motd);
 
-		auto outapp = std::make_unique<EQApplicationPacket>(OP_MOTD, buf);
+		auto outapp = std::make_unique<EQApplicationPacket>(OP_MOTD, std::move(buf));
 
 		entity_list.QueueClients(0, outapp.get());
 		break;
@@ -878,7 +878,7 @@ void WorldServer::HandleMessage(uint16 opcode, const EQ::Net::Packet &p)
 		ServerMultiLineMsg_Struct* mlm = (ServerMultiLineMsg_Struct*)pack->pBuffer;
 		Client* client = entity_list.GetClientByName(mlm->to);
 		if (client) {
-			auto outapp = new EQApplicationPacket(OP_MultiLineMsg, strlen(mlm->message));
+			auto outapp = new EQApplicationPacket(OP_MultiLineMsg, strlen(mlm->message) + 1);
 			strcpy((char*)outapp->pBuffer, mlm->message);
 			client->QueuePacket(outapp);
 			safe_delete(outapp);
@@ -1006,6 +1006,9 @@ void WorldServer::HandleMessage(uint16 opcode, const EQ::Net::Packet &p)
 
 			LogInfo("Time Broadcast Packet: {}", time_message);
 			zone->SetZoneHasCurrentTime(true);
+
+			// spawn events were loaded against the default clock; catch them up to real time
+			zone->spawn_conditions.CatchUpEvents();
 
 		}
 		if (zone && zone->is_zone_time_localized) {
@@ -4596,7 +4599,10 @@ void WorldServer::ProcessReload(const ServerReload::Request& request)
 		}
 	}
 
-	zone->SendReloadMessage(ServerReload::GetName(request.type));
+	// coin pushes follow every Spire grant, so they don't announce themselves to GMs
+	if (request.type != ServerReload::Type::MarketplaceCoins) {
+		zone->SendReloadMessage(ServerReload::GetName(request.type));
+	}
 
 	switch (request.type) {
 		case ServerReload::Type::AAData:
@@ -4655,6 +4661,15 @@ void WorldServer::ProcessReload(const ServerReload::Request& request)
 			break;
 
 		case ServerReload::Type::Maps:
+		case ServerReload::Type::Marketplace:
+			Marketplace::Instance()->LoadOffers();
+			entity_list.SendMarketplaceCatalog();
+			break;
+
+		case ServerReload::Type::MarketplaceCoins:
+			entity_list.SendMarketplaceBalances();
+			break;
+
 			zone->ReloadMaps();
 			break;
 

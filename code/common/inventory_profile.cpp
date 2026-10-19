@@ -1,21 +1,20 @@
-/*	EQEMu: Everquest Server Emulator
-	Copyright (C) 2001-2016 EQEMu Development Team (http://eqemulator.net)
+/*	EQEmu: EQEmulator
+
+	Copyright (C) 2001-2026 EQEmu Development Team
 
 	This program is free software; you can redistribute it and/or modify
 	it under the terms of the GNU General Public License as published by
-	the Free Software Foundation; version 2 of the License.
+	the Free Software Foundation; either version 3 of the License, or
+	(at your option) any later version.
 
 	This program is distributed in the hope that it will be useful,
-	but WITHOUT ANY WARRANTY except by those people which sell it, which
-	are required to give you total support for your newly bought product;
-	without even the implied warranty of MERCHANTABILITY or FITNESS FOR
-	A PARTICULAR PURPOSE. See the GNU General Public License for more details.
+	but WITHOUT ANY WARRANTY; without even the implied warranty of
+	MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+	GNU General Public License for more details.
 
 	You should have received a copy of the GNU General Public License
-	along with this program; if not, write to the Free Software
-	Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
+	along with this program. If not, see <http://www.gnu.org/licenses/>.
 */
-
 #include "inventory_profile.h"
 
 #include "common/data_verification.h"
@@ -24,6 +23,7 @@
 #include "common/strings.h"
 #include "common/textures.h"
 
+#include <algorithm>
 #include <iostream>
 
 std::list<EQ::ItemInstance*> dirty_inst;
@@ -77,6 +77,19 @@ EQ::ItemInstance* ItemInstQueue::pop_back()
 	return inst;
 }
 
+// Remove a specific item from the queue (and take control of memory)
+EQ::ItemInstance* ItemInstQueue::remove(const EQ::ItemInstance* inst)
+{
+	auto it = std::find(m_list.begin(), m_list.end(), inst);
+	if (it == m_list.end()) {
+		return nullptr;
+	}
+
+	EQ::ItemInstance* found = *it;
+	m_list.erase(it);
+	return found;
+}
+
 // Look at item at front of queue
 EQ::ItemInstance* ItemInstQueue::peek_front() const
 {
@@ -117,6 +130,18 @@ EQ::InventoryProfile::~InventoryProfile()
 	}
 
 	m_trade.clear();
+
+	for (auto iter = m_keyring.begin(); iter != m_keyring.end(); ++iter) {
+		safe_delete(iter->second);
+	}
+
+	m_keyring.clear();
+
+	for (auto iter = m_dragon_hoard.begin(); iter != m_dragon_hoard.end(); ++iter) {
+		safe_delete(iter->second);
+	}
+
+	m_dragon_hoard.clear();
 }
 
 void EQ::InventoryProfile::SetInventoryVersion(versions::MobVersion inventory_version) {
@@ -158,7 +183,11 @@ EQ::ItemInstance* EQ::InventoryProfile::GetItem(int16 slot_id) const
 	}
 
 	// Non bag slots
-	if (EQ::ValueWithin(slot_id, invslot::TRADE_BEGIN, invslot::TRADE_END)) {
+	if (invslot::IsKeyRingSlot(slot_id)) {
+		result = _GetItem(m_keyring, slot_id);
+	} else if (invslot::IsDragonHoardSlot(slot_id)) {
+		result = _GetItem(m_dragon_hoard, slot_id);
+	} else if (EQ::ValueWithin(slot_id, invslot::TRADE_BEGIN, invslot::TRADE_END)) {
 		result = _GetItem(m_trade, slot_id);
 	} else if (EQ::ValueWithin(slot_id, invslot::SHARED_BANK_BEGIN, invslot::SHARED_BANK_END)) {
 		result = _GetItem(m_shbank, slot_id);
@@ -257,6 +286,15 @@ EQ::ItemInstance* EQ::InventoryProfile::GetCursorItem() {
 	return m_cursor.peek_front();
 }
 
+EQ::ItemInstance* EQ::InventoryProfile::PopCursorQueueItem(const ItemInstance* inst) {
+	// the front of the queue is the cursor itself
+	if (!inst || m_cursor.empty() || m_cursor.peek_front() == inst) {
+		return nullptr;
+	}
+
+	return m_cursor.remove(inst);
+}
+
 // Swap items in inventory
 bool EQ::InventoryProfile::SwapItem(
 	int16 source_slot,
@@ -350,7 +388,7 @@ bool EQ::InventoryProfile::SwapItem(
 				fail_state = swapLevel;
 				return false;
 			}
-			if (source_item_instance->IsEvolving() > 0) {
+			if (source_item_instance->IsEvolving()) {
 				source_item_instance->SetEvolveEquipped(true);
 			}
 		}
@@ -471,6 +509,18 @@ EQ::ItemInstance* EQ::InventoryProfile::PopItem(int16 slot_id)
 	} else if (EQ::ValueWithin(slot_id, invslot::TRADE_BEGIN, invslot::TRADE_END)) {
 		p = m_trade[slot_id];
 		m_trade.erase(slot_id);
+	} else if (invslot::IsKeyRingSlot(slot_id)) {
+		auto it = m_keyring.find(slot_id);
+		if (it != m_keyring.end()) {
+			p = it->second;
+			m_keyring.erase(it);
+		}
+	} else if (invslot::IsDragonHoardSlot(slot_id)) {
+		auto it = m_dragon_hoard.find(slot_id);
+		if (it != m_dragon_hoard.end()) {
+			p = it->second;
+			m_dragon_hoard.erase(it);
+		}
 	} else {
 	// Is slot inside bag?
 		ItemInstance* bag_inst = GetItem(InventoryProfile::CalcSlotId(slot_id));
@@ -1218,6 +1268,9 @@ bool EQ::InventoryProfile::SupportsClickCasting(int16 slot_id)
 		if (inventory::StaticLookup(m_mob_version)->AllowClickCastFromBag) {
 			return true;
 		}
+	} else if (invslot::IsKeyRingSlot(slot_id)) {
+		// TOB+ key ring items are used straight from the ring
+		return m_mob_version == versions::MobVersion::TOB;
 	}
 
 	return false;
@@ -1278,6 +1331,16 @@ int EQ::InventoryProfile::GetSlotByItemInst(ItemInstance *inst) {
 	}
 
 	i = GetSlotByItemInstCollection(m_trade, inst);
+	if (i != INVALID_INDEX) {
+		return i;
+	}
+
+	i = GetSlotByItemInstCollection(m_keyring, inst);
+	if (i != INVALID_INDEX) {
+		return i;
+	}
+
+	i = GetSlotByItemInstCollection(m_dragon_hoard, inst);
 	if (i != INVALID_INDEX) {
 		return i;
 	}
@@ -1443,6 +1506,12 @@ int16 EQ::InventoryProfile::_PutItem(int16 slot_id, ItemInstance* inst)
 		result = slot_id;
 	} else if (EQ::ValueWithin(slot_id, invslot::TRADE_BEGIN, invslot::TRADE_END)) {
 		m_trade[slot_id] = inst;
+		result = slot_id;
+	} else if (invslot::IsKeyRingSlot(slot_id)) {
+		m_keyring[slot_id] = inst;
+		result = slot_id;
+	} else if (invslot::IsDragonHoardSlot(slot_id)) {
+		m_dragon_hoard[slot_id] = inst;
 		result = slot_id;
 	} else {
 		// Slot must be within a bag

@@ -361,6 +361,8 @@ sub _pop_restore_stats {
     my $orig_hp  = $npc->GetEntityVariable('enc_orig_max_hp');
     return unless defined $orig_hp && $orig_hp > 0;
 
+    my $hp_ratio = $npc->GetHPRatio();
+
     my $orig_min = $npc->GetEntityVariable('enc_orig_min_hit');
     my $orig_max = $npc->GetEntityVariable('enc_orig_max_hit');
     my $orig_atk = $npc->GetEntityVariable('enc_orig_atk');
@@ -380,7 +382,13 @@ sub _pop_restore_stats {
     $npc->ModifyNPCStat("pr",      "$orig_pr");
     $npc->ModifyNPCStat("dr",      "$orig_dr");
     $npc->ModifyNPCStat("heal_scale", "100");
-    $npc->SetHP($npc->GetMaxHP());
+
+    # Keep damage already dealt. Full-healing here reset bosses to 100% on every
+    # aggro drop (feign death, mem blur, rescan). Recovery is handled by the
+    # NPC:OOCRegen rule instead.
+    my $restored_hp = int($npc->GetMaxHP() * $hp_ratio / 100);
+    $restored_hp = 1 if $restored_hp < 1;
+    $npc->SetHP($restored_hp);
 }
 
 sub _pop_count_participants {
@@ -517,10 +525,13 @@ sub _pop_apply_scaling {
     my $orig_max = int($npc->GetEntityVariable('enc_orig_max_hit') || $npc->GetMaxDMG());
     my $orig_atk = int($npc->GetEntityVariable('enc_orig_atk')     || $npc->GetATK());
 
-    # HP
+    # HP — keep the same damage taken percentage across the rescale
+    my $hp_ratio = $npc->GetHPRatio();
     my $new_hp = max(1, int($orig_hp * $mults->{hp}));
     $npc->ModifyNPCStat("max_hp", "$new_hp");
-    $npc->SetHP($npc->GetMaxHP());
+    my $scaled_hp = int($npc->GetMaxHP() * $hp_ratio / 100);
+    $scaled_hp = 1 if $scaled_hp < 1;
+    $npc->SetHP($scaled_hp);
 
     # Melee damage with level-based floors
     my $level = $npc->GetLevel();

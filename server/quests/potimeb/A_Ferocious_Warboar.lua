@@ -1,3 +1,5 @@
+local charm_credit = require("potimeb_charm_credit");
+
 --A_Ferocious_Warboar
 --Phase 3 Event Mini-boss
 --potimeb
@@ -10,6 +12,13 @@ function event_combat(e)
 end
 
 function event_death_complete(e)
-	eq.signal(223097,223008); -- Add Loot Lockout
-	eq.signal(223097,4); -- send a signal to the zone_status that I died
+	charm_credit.death(e, { {223097, 223008}, {223097, 4} });
+end
+
+function event_charm_start(e)
+	charm_credit.charm_start(e, { {223097, 223008}, {223097, 4} });
+end
+
+function event_charm_end(e)
+	charm_credit.charm_end(e);
 end

@@ -118,6 +118,7 @@ sub GetRandomClassTome {
     $tomes{8192}{3} = [121745, 121780, 121798];         # Enchanter (Stasis, Dire Charm, Gather Mana)
     $tomes{16384}{3} = [121677, 121725, 121796, 121845]; # Beastlord (Feral Swipe, Roar of Thunder, Frenzy of Spirit, Warder's Fury)
     $tomes{16841}{3} = [121830];                        # Warrior, Ranger, Monk, Bard, Rogue, Beastlord (Sinister Strikes)
+    $tomes{32306}{3} = [121848];                        # Cleric, Shadowknight, Druid, Shaman, Necromancer, Wizard, Magician, Enchanter, Beastlord (Extended Swarm)
     $tomes{32768}{3} = [121634, 121692, 121828];        # Berserker (Desperation, Hastened War Cry, Savage Spirit)
     $tomes{32769}{3} = [121802];                        # Warrior, Berserker (Hastened Rampage)
         

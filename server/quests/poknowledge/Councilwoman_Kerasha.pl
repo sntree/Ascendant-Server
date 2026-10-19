@@ -2,17 +2,46 @@
 #Essences of Power
 # items: 17183, 16266, 32106, 17209, 32107, 32108, 32109
 
+my @rewards = (
+  [32106, "Jade Hoop of Speed"],
+  [17209, "Frizznik's Endless Coin Purse"],
+  [32107, "Cord of Invigoration"],
+  [32108, "Mace of the Ancients"],
+  [32109, "Ring of Farsight"],
+);
+
+sub GiveNextAvailableReward {
+  my ($start_index, $return_item_id) = @_;
+
+  for (my $offset = 0; $offset < scalar @rewards; $offset++) {
+    my $index = ($start_index + $offset) % scalar @rewards;
+    my ($reward_id, $reward_name) = @{$rewards[$index]};
+
+    next if $reward_id == $return_item_id;
+    next if $client->CountItem($reward_id) > 0;
+
+    quest::summonitem($reward_id);
+    quest::say("Take this, may it serve you well, $name.");
+    return;
+  }
+
+  quest::summonitem($return_item_id);
+  quest::say("You already possess each reward I can offer. I have returned what you gave me.");
+}
+
 sub EVENT_SAY {
+  if($text=~/essences of power/i) {
+    quest::say("The powers that watch over the four elemental planes all guard their respective essence of power. You must defeat each of them in turn and place them all within this sacred bowl. Once I have the combined power of the planes I can begin the ceremony and set the foundation of the city to rights. Thank you for your offer to assist me $name.");
+    quest::summonitem(17183); #Sacred Bowl
+    return;
+  }
+
   if(defined($qglobals{AidEinoDone}) && ($qglobals{AidEinoDone} == 1)) { #Can't do the turn in without getting the bowl, so I'm not worried about restricting the turn ins on the flag, just this text and getting the bowl.
     if($text=~/hail/i) {
       quest::say("Greetings $name! It pleases me very much that you were able to help Eino out in his time of need.' Councilwoman Kerasha glances at Eino, 'Tunare only knows what I would do without him at my side. There is another matter at hand that has come to the attention of the council that is beyond even our combined power and requires the aid of a powerful alliance. Would you be willing to aid Tanaan?");
     }
     if($text=~/aid/i) {
       quest::say("A rift in this plane at the point of harmony upon which the city of Tanaan is built is crumbling. The other council members do not see it happening for they lack the sight that I possess. Granted it will take time but it is something that must be set to right or our home will fall to waste among the tides of the Planes.' Councilwoman Kerasha's body grows rigid. 'I did not spend my life in defense of this city to watch it crumble to dust! The way to repair the breach is difficult but I feel Tunare will grant me the strength once I have the four essences of power in my grasp.");
-    }
-    if($text=~/essences of power/i) {
-      quest::say("The powers that watch over the four elemental planes all guard their respective essence of power. You must defeat each of them in turn and place them all within this sacred bowl. Once I have the combined power of the planes I can begin the ceremony and set the foundation of the city to rights. Thank you for your offer to assist me $name.");
-      quest::summonitem(17183); #Sacred Bowl
     }
   }
   else {
@@ -25,27 +54,17 @@ sub EVENT_SAY {
 sub EVENT_ITEM {
   if(plugin::check_handin(\%itemcount, 16266 => 1)) { #Power of the Planes
     quest::emote("takes the Power from you and hands it to Aid Eino. 'Thank you $name. The energy I must expend to perform such a task is days in the gathering. The city of Tanaan is forever in your debt. Take this, it is but a small token of the gratitude of the city. If it does not suit you, return it to me and I shall give you another reward.'");
-    quest::summonitem(32106); #Jade Hoop of Speed
+    GiveNextAvailableReward(0, 16266);
   }
-  elsif(plugin::check_handin(\%itemcount, 32106 => 1)) { #Jade Hoop of Speed
-    quest::say("I understand. Take this, may it serve you well, $name.");
-    quest::summonitem(17209); #Frizznik's Endless Coin Purse
-  }
-  elsif(plugin::check_handin(\%itemcount, 17209 => 1)) { #Frizznik's Endless Coin Purse
-    quest::say("I understand. Take this, may it serve you well, $name.");
-    quest::summonitem(32107); #Cord of Invigoration
-  }
-  elsif(plugin::check_handin(\%itemcount, 32107 => 1)) { #Cord of Invigoration
-    quest::say("I understand. Take this, may it serve you well, $name.");
-    quest::summonitem(32108); #Mace of the Ancients
-  }
-  elsif(plugin::check_handin(\%itemcount, 32108 => 1)) { #Mace of the Ancients
-    quest::say("I understand. Take this, may it serve you well, $name.");
-    quest::summonitem(32109); #Ring of Farsight
-  }
-  elsif(plugin::check_handin(\%itemcount, 32109 => 1)) { #Ring of Farsight
-    quest::say("I understand. Take this, may it serve you well, $name.");
-    quest::summonitem(32106); #Jade Hoop of Speed
+  else {
+    for (my $index = 0; $index < scalar @rewards; $index++) {
+      my $item_id = $rewards[$index][0];
+
+      if(plugin::check_handin(\%itemcount, $item_id => 1)) {
+        GiveNextAvailableReward(($index + 1) % scalar @rewards, $item_id);
+        last;
+      }
+    }
   }
   plugin::return_items(\%itemcount);
 }

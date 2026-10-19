@@ -1,10 +1,6 @@
 function event_combat(e)
 if e.joined then
-eq.set_timer('Hardblur', 180 * 1000);
-eq.set_timer('Softblur', 6 * 1000);
 else
-eq.stop_timer('Hardblur');
-eq.stop_timer('Softblur');
 end
 end
 

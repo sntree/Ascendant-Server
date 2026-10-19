@@ -122,7 +122,8 @@ sub EVENT_SPAWN {
   if ($instanceid && $instanceid > 0 && $npc->IsRaidTarget()) {
       my $npc_id = $npc->GetNPCTypeID();
       # Exception: Narandi the Wretched (118145) must stay in normal instances for Ring War
-      my %raid_depop_exceptions = (118145 => 1);
+      # Exception: Ageless Relic Protector split forms (293222/293223) - Kod'Taz Pit of the Lost step
+      my %raid_depop_exceptions = (118145 => 1, 293222 => 1, 293223 => 1);
       if (!$raid_depop_exceptions{$npc_id}) {
           my $zone_short = quest::GetZoneShortName($zoneid);
           if (plugin::HasRaidTier($zone_short)) {
@@ -146,7 +147,7 @@ sub EVENT_SPAWN {
   # Skip combat scaling for pets, but allow other pet logic
   my $is_pet = $npc->IsPet();
 
-  if (!$is_pet && !plugin::IsScalingZone($zoneid) && !plugin::IsLdonScalingZone($zoneid) && !plugin::IsLuclinScalingZone($zoneid) && !plugin::IsPopScalingZone($zoneid)) {
+  if (!$is_pet && !plugin::IsScalingZone($zoneid) && !plugin::IsLdonScalingZone($zoneid) && !plugin::IsLuclinScalingZone($zoneid) && !plugin::IsPopScalingZone($zoneid) && !plugin::IsLoyScalingZone($zoneid) && !(defined &plugin::IsGodScalingZone && plugin::IsGodScalingZone($zoneid))) {
 
 
     # ---------- DAMAGE ----------
@@ -330,11 +331,14 @@ sub EVENT_SPAWN {
   # -----------------------------
   my $npc_level = $npc->GetLevel();
 
-  # Velious/PoP raid targets: level-banded raid loot (2-3 items), skips rare pool
+  # Velious/PoP/LoY raid targets: level-banded raid loot (2-3 items), skips rare pool
   my $is_velious_raid = 0;
-  if ($npc->IsRaidTarget()) {
+  # Ascendant: event phases/adds that respawn on reset must not roll raid bonus loot (farmable).
+  # Tacvi: fake Tunat`Muram Cuu Vauax (298014), Zun`Muram Mordl Delt split adds (298050-298053)
+  my %no_raid_bonus_loot = map { $_ => 1 } (298014, 298050, 298051, 298052, 298053);
+  if ($npc->IsRaidTarget() && !$no_raid_bonus_loot{$npc->GetNPCTypeID()}) {
       my $zone_exp = plugin::zone_to_expansion($zoneid);
-      if ($zone_exp && ($zone_exp eq 'velious' || $zone_exp eq 'pop')) {
+      if ($zone_exp && ($zone_exp eq 'velious' || $zone_exp eq 'pop' || $zone_exp eq 'loy' || $zone_exp eq 'god')) {
           $is_velious_raid = 1;
           plugin::raid_levelblock_loot($npc, $npc_level, $zoneid);
       }
@@ -531,6 +535,8 @@ sub EVENT_COMBAT {
         plugin::LdonScaling_OnEngage($npc);
         plugin::LuclinScaling_OnEngage($npc);
         plugin::PopScaling_OnEngage($npc);
+        plugin::LoyScaling_OnEngage($npc);
+        plugin::GodScaling_OnEngage($npc) if defined &plugin::GodScaling_OnEngage;
         plugin::AprilFools_OnEngage($npc);
 
         # Fellowship mob strength scaling (after encounter scaling)
@@ -546,6 +552,8 @@ sub EVENT_COMBAT {
         plugin::LdonScaling_OnDisengage($npc);
         plugin::LuclinScaling_OnDisengage($npc);
         plugin::PopScaling_OnDisengage($npc);
+        plugin::LoyScaling_OnDisengage($npc);
+        plugin::GodScaling_OnDisengage($npc) if defined &plugin::GodScaling_OnDisengage;
         plugin::Fellowship_RestoreMob($npc);
     }
 }
@@ -566,6 +574,8 @@ sub EVENT_TIMER {
     plugin::LdonScaling_Rescan($npc);
     plugin::LuclinScaling_Rescan($npc);
     plugin::PopScaling_Rescan($npc);
+    plugin::LoyScaling_Rescan($npc);
+    plugin::GodScaling_Rescan($npc) if defined &plugin::GodScaling_Rescan;
     return;
   }
 
@@ -763,6 +773,98 @@ sub EVENT_DEATH {
       }
     }
   }
+}
+
+# -----------------------------------------------------------------------------
+# EVENT_KILLED_MERIT — Gates of Discord kill tracking + SERVER FIRSTs
+# Fires once per raid/group member with kill credit. For every GoD raid encounter:
+#   * per-account bucket  god_<key>_<account_id> = char name   (Aurelian reads the 6
+#     finishing keys: cragbeastqueen, zunmuramvotal, vrexbarxt, keeperaltar, iqthinxa, noqufiel)
+#   * server first        first_kill_<key> = "Name|Guild"  (same key convention as the
+#     Classic-PoP boss scripts; website-readable) + world emote.
+# Lives here (not in PEQ boss scripts) so it survives script refreshes. Multi-NPC
+# encounters (twins, alt ids) credit whichever listed NPC dies first.
+# -----------------------------------------------------------------------------
+my %GOD_KILL_TRACKING = (
+    280080 => ['cragbeastqueen', "the Cragbeast Queen"],  # Natimbi
+    281089 => ['gorlakt', "Mastruq Commander Gorlakt"],  # Qinimi
+    281090 => ['spiritlords', "the Spiritlords"],  # Qinimi
+    281091 => ['spiritlords', "the Spiritlords"],  # Qinimi
+    281126 => ['xictickrvne', "Pixtt Xictic Krvne"],  # Qinimi
+    281030 => ['massofstone', "the Mass of Stone"],  # Qinimi
+    281125 => ['kabekakret', "Kabeka Kret"],  # Qinimi
+    282105 => ['krisz', "Taskmistress Krisz"],  # Riwwi
+    283049 => ['colossusofwar', "the Colossus of War"],  # Barindu
+    283050 => ['ikaavixvetpox', "Ikaav Ixvet Pox"],  # Barindu
+    283162 => ['ikaavixvetpox', "Ikaav Ixvet Pox"],  # Barindu
+    284067 => ['skoiatpizak', "Packmaster Skoiat Pizak"],  # Ferubi
+    284080 => ['zunmuramvotal', "Zun`Muram Votal"],  # Ferubi
+    284097 => ['smithrondo', "Smith Rondo"],  # Ferubi
+    291102 => ['primalreptile', "the Primal Reptile"],  # Yxtta
+    291115 => ['primalarachnid', "the Primal Arachnid"],  # Yxtta
+    291117 => ['primalinsect', "the Primal Insect"],  # Yxtta
+    291111 => ['mindrider', "Pixtt Suir Mindrider"],  # Yxtta
+    293044 => ['pixttnemis', "Pixtt Nemis"],  # Kod'Taz
+    293214 => ['chaosprovoker', "the Hexxt Chaos Provoker"],  # Kod'Taz
+    292021 => ['tqivtwins', "the Tqiv twins"],  # Uqua
+    292022 => ['tqivtwins', "the Tqiv twins"],  # Uqua
+    292065 => ['devastatingconstruct', "the Devastating Construct"],  # Uqua
+    292069 => ['vrexbarxt', "Vrex Barxt Qurat"],  # Uqua
+    294577 => ['tuniktamuik', "the Spirit of Tunik Tamuik"],  # Ikkinz
+    294471 => ['guardianglorification', "the Guardian of Glorification"],  # Ikkinz
+    294582 => ['guardianglorification', "the Guardian of Glorification"],  # Ikkinz
+    294595 => ['xalkaknixki', "Vrex Xalkak Nixki"],  # Ikkinz
+    294620 => ['keeperaltar', "the Keeper of the Altar"],  # Ikkinz
+    295140 => ['cynosure', "Cynosure Kvanjji"],  # Qvic
+    295149 => ['cynosure', "Cynosure Kvanjji"],  # Qvic
+    295001 => ['mnatmsha', "Mnat M`sha"],  # Qvic
+    295087 => ['dvoinmsha', "Dvoin M`sha"],  # Qvic
+    295134 => ['ptavmsha', "Ptav M`sha"],  # Qvic
+    295130 => ['iqthinxa', "Iqthinxa Karnkvi"],  # Qvic
+    295150 => ['iqthinxa', "Iqthinxa Karnkvi"],  # Qvic
+    296013 => ['nijacka', "Nijacka the Scourge"],  # Inktu`Ta
+    296024 => ['kelekdrix', "Kelekdrix, Herald of Trushar"],  # Inktu`Ta
+    296027 => ['mimezpo', "Mimezpo the Oracle"],  # Inktu`Ta
+    296065 => ['noqufiel', "Noqufiel"],  # Inktu`Ta
+    297056 => ['cragbeastmatriarch', "the Ancient Cragbeast Matriarch"],  # Txevu
+    297023 => ['aneuktwins', "the Aneuk twins"],  # Txevu
+    297025 => ['aneuktwins', "the Aneuk twins"],  # Txevu
+    297218 => ['nkosibakari', "High Priest Nkosi Bakari"],  # Txevu
+    297090 => ['ikaavnysflleiv', "Ikaav Nysf Lleiv"],  # Txevu
+    297032 => ['ixttwins', "Ixt Kial Ivesi and Ixt Quall Nalnn"],  # Txevu
+    297043 => ['ixttwins', "Ixt Kial Ivesi and Ixt Quall Nalnn"],  # Txevu
+    297044 => ['ixttwins', "Ixt Kial Ivesi and Ixt Quall Nalnn"],  # Txevu
+    297049 => ['ixttwins', "Ixt Kial Ivesi and Ixt Quall Nalnn"],  # Txevu
+    297074 => ['ixttwins', "Ixt Kial Ivesi and Ixt Quall Nalnn"],  # Txevu
+    297091 => ['ixttwins', "Ixt Kial Ivesi and Ixt Quall Nalnn"],  # Txevu
+    297211 => ['ixthseksyat', "Ixt Hsek Syat"],  # Txevu
+    297082 => ['ukunbloodfeaster', "Ukun Bloodfeaster"],  # Txevu
+    297150 => ['tkarishzyk', "Zun`Muram Tkarish Zyk"],  # Txevu
+    298039 => ['xxerickex', "Pixtt Xxeric Kex"],  # Tacvi
+    298201 => ['kretvkrakxt', "Pixtt Kretv Krakxt"],  # Tacvi
+    298032 => ['rieltavas', "Pixtt Riel Tavas"],  # Tacvi
+    298018 => ['shaldnboc', "Zun`Muram Shaldn Boc"],  # Tacvi
+    298020 => ['mordldelt', "Zun`Muram Mordl Delt"],  # Tacvi
+    298023 => ['yihstvor', "Zun`Muram Yihst Vor"],  # Tacvi
+    298029 => ['kvxepirik', "Zun`Muram Kvxe Pirik"],  # Tacvi
+    298055 => ['tunatmuram', "Tunat`Muram Cuu Vauax"],  # Tacvi
+);
+
+sub EVENT_KILLED_MERIT {
+    return unless $npc && $client;
+    my $boss = $GOD_KILL_TRACKING{$npc->GetNPCTypeID()};
+    return unless $boss;
+    my ($key, $boss_name) = @$boss;
+    my $char_name = $client->GetCleanName();
+    quest::set_data('god_' . $key . '_' . $client->AccountID(), $char_name);
+
+    my $first_key = 'first_kill_' . $key;
+    return if quest::get_data($first_key) || $client->GetGM();
+    my $guild = $client->GuildID() > 0 ? quest::getguildnamebyid($client->GuildID()) : '';
+    $guild = '' unless defined $guild;
+    quest::set_data($first_key, $char_name . '|' . $guild);
+    my $who = $guild ne '' ? "$char_name <$guild>" : $char_name;
+    quest::we(15, "SERVER FIRST! $who and their group have slain $boss_name for the first time on this server!");
 }
 
 # -----------------------------------------------------------------------------

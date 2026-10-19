@@ -1,8 +1,17 @@
+local charm_credit = require("potimeb_charm_credit");
+
 --Neimon_of_Air (223120)
 --Phase 1 - Neimon of Air Trial
 --potimeb
 
 function event_death_complete(e)
-	-- send a signal to the #air_trigger that I died
-	eq.signal(223170,2);
+	charm_credit.death(e, { {223170, 2} });
+end
+
+function event_charm_start(e)
+	charm_credit.charm_start(e, { {223170, 2} });
+end
+
+function event_charm_end(e)
+	charm_credit.charm_end(e);
 end

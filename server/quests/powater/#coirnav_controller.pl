@@ -1,5 +1,25 @@
 my $namedcount = 0; # Sets the named counter for later use
 my $coirnav_wave = 0; # Instance-local wave tracker (was a server-wide qglobal; not instance-safe)
+my $recovery_active = 0;
+my $hard_cap_started = 0;
+
+my $RECOVERY_SECONDS = 60 * 60;  # 1 hour
+my $HARD_CAP_SECONDS = 2 * 60 * 60; # 2 hours
+
+# NPC IDs that count as "event engaged" for recovery-timer purposes
+my @event_mobs = (
+  216048, # fake Coirnav
+  216094, # real Coirnav
+  216070, # #Pwelon_of_Vapor (tough)
+  216061, # #Nrinda_of_Ice (tough)
+  216065, # #Vamuil_of_Water (tough)
+  216109, # Pwelon_of_Vapor (weak)
+  216108, # Nrinda_of_Ice (weak)
+  216110, # Vamuil_of_Water (weak)
+  216071, # Triloun Vaporfiend
+  216076, # Hraquis Icefiend
+  216060, # Regrua Waterfiend
+);
 
 # Lockout qglobal must be instance-scoped so concurrent powater instances don't collide.
 # (quest_globals has no instanceid column, so we encode the instance id into the key name.)
@@ -9,6 +29,16 @@ sub _coirnav_done_key {
 
 sub EVENT_SPAWN { #Only needed for #repop during testing
   quest::stopalltimers();
+  # Fresh DZ boot: clear any stale Coirnav lockout left by a PREVIOUS expedition
+  # that reused this instance id. quest_globals have no instanceid column, so the
+  # lockout is encoded in the key name and would otherwise be inherited by a
+  # recycled instance id -- which made #Guardian_of_Coirnav depop on spawn
+  # ("Guardian despawned on engage"). The real cross-session lockout is the
+  # expedition replay timer (AddReplayLockout), not this qglobal.
+  quest::delglobal(_coirnav_done_key());
+  $recovery_active = 0;
+  $hard_cap_started = 0;
+  $coirnav_wave = 0;
 }
 
 sub EVENT_SIGNAL {
@@ -52,29 +82,24 @@ sub EVENT_SIGNAL {
 }
 
 sub EVENT_TIMER {
-  if($timer == 1) { # This gets called when you fail because of timeout
-    quest::stopalltimers(); # Stop last timer - rest of them are stopped by now
-
-    quest::depopall(216071); #Depop any remaining trash creatures
-    quest::depopall(216076);
-    quest::depopall(216074);
-    quest::depopall(216060);
-    quest::depopall(216067);
-    quest::depopall(216057);
-
-    quest::signalwith(216048,7,0); #Signal fake coirnav for banish emote
-    quest::signalwith(216094,7,0); #or  real coirnav for banish emote
-
-    quest::depop(216061); # Depop any nameds up - sorry.
-    quest::depop(216070);
-    quest::depop(216065);
-    quest::depop(216094);
-    quest::depop(216108);
-    quest::depop(216109);
-    quest::depop(216110);
-    $coirnav_wave = 0;
-    quest::setglobal(_coirnav_done_key(), 3, 7, "H2"); # You can't attempt this again for 2 hours
-    quest::settimer(7,45); # Reset kickout timer
+  if($timer eq "hard_cap") {
+    FAIL_EVENT();
+    return;
+  }
+  if($timer eq "recovery") {
+    FAIL_EVENT();
+    return;
+  }
+  if($timer eq "recovery_check") {
+    if(EVENT_IS_ENGAGED()) {
+      quest::stoptimer("recovery");
+      $recovery_active = 0;
+    } elsif($hard_cap_started && !$recovery_active) {
+      quest::settimer("recovery", $RECOVERY_SECONDS);
+      $recovery_active = 1;
+    }
+    quest::settimer("recovery_check", 5);
+    return;
   }
 
   if($timer == 2){ # 2nd wave of trash+named
@@ -85,7 +110,7 @@ sub EVENT_TIMER {
     SPAWN_WAVE3();
   }
 
-  if($timer == 4){ # Charging kickout
+  if($timer == 4){ # Charging kickout (emote)
     quest::ze(0, "Coirnav the Avatar of Water is suddenly surrounded by a slight glow. A low constant humming is heard in the background.");
     quest::stoptimer(4);
   }
@@ -128,6 +153,43 @@ sub EVENT_TIMER {
   }
 }
 
+sub EVENT_IS_ENGAGED {
+  foreach my $npc_id (@event_mobs) {
+    my $mob = $entity_list->GetMobByNpcTypeID($npc_id);
+    if($mob && $mob->IsEngaged()) {
+      return 1;
+    }
+  }
+  return 0;
+}
+
+sub FAIL_EVENT {
+  quest::stopalltimers();
+  $recovery_active = 0;
+  $hard_cap_started = 0;
+
+  quest::depopall(216071); #Depop any remaining trash creatures
+  quest::depopall(216076);
+  quest::depopall(216074);
+  quest::depopall(216060);
+  quest::depopall(216067);
+  quest::depopall(216057);
+
+  quest::signalwith(216048,7,0); #Signal fake coirnav for banish emote
+  quest::signalwith(216094,7,0); #or real coirnav for banish emote
+
+  quest::depop(216061); # Depop any nameds up - sorry.
+  quest::depop(216070);
+  quest::depop(216065);
+  quest::depop(216094);
+  quest::depop(216108);
+  quest::depop(216109);
+  quest::depop(216110);
+  $coirnav_wave = 0;
+  quest::setglobal(_coirnav_done_key(), 3, 7, "H2"); # You can't attempt this again for 2 hours
+  quest::settimer(7,45); # Kickout timer
+}
+
 sub KICK_ALL_PLAYERS {
   #zone all players back to PoKnowledge
   foreach $pc ($entity_list->GetClientList()) {
@@ -136,7 +198,9 @@ sub KICK_ALL_PLAYERS {
 }
 
 sub SPAWN_WAVE1 {
-  quest::settimer(1,895); # 15 Minute timer for the kickout event!!
+  quest::settimer("hard_cap", $HARD_CAP_SECONDS); # 2 hour hard cap from wave 1 start
+  quest::settimer("recovery_check", 5);           # heartbeat to start recovery when disengaged
+  $hard_cap_started = 1;
   quest::settimer(2,180); # 3 Minute timer for second wave spawn
   quest::settimer(3,300); # 5 Minute timer for third wave
   quest::settimer(4,600); # 10 Minute timer for the emote

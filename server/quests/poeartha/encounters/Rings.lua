@@ -281,6 +281,13 @@ local function Mark_Ring_Complete(ring_name)
 	Try_Spawn_Arbiter(ring_name);
 end
 
+function FinalTrigger_Spawn(e)
+	-- If all four rings were finished while the Final Trigger (218094) was down,
+	-- spawn the Arbiter as soon as the trigger (re)appears instead of requiring
+	-- another ring completion to re-run the gate.
+	Try_Spawn_Arbiter("final_trigger_spawn");
+end
+
 
 
 function Rock_Death(e)   -- Count these, if 2 Spawn Fortification mobs at their assigned locations
@@ -498,6 +505,15 @@ function Pereginspawnone_Timer(e)
 end
 
 function Placeholder_Spawn(e)
+		-- 218029 (A_Rock_Monstrosity placeholder) respawning is the stone-ring fail
+		-- timer. Only treat it as a fail/reset when the ring is NOT already in progress.
+		-- A respawn mid-run used to depop Peregrin and the waves and halt the event;
+		-- now we just re-arm the placeholder and leave the active run untouched.
+		if stone_phase ~= "idle" then
+			eq.depop_with_timer(218029);
+			return;
+		end
+
 		Reset_Ring_Completion("stone"); -- If this mob respawns (reset Stone_Counter to 0) [Fail] , you have taken too much time, we are using this as the timer.  ## This is the fail check ##
 		Reset_Stone_State();
 		eq.depop(218049); -- Depop Peregin(Fake)
@@ -552,23 +568,12 @@ function Heap_Death(e)  -- Count waves of Heaps in 4's  it takes 24 to spawn the
 end
 
 function Peregin_Combat(e)
-	if e.joined then
-		eq.set_timer('Hardblur', 180 * 1000);
-		eq.set_timer('Softblur', 6 * 1000);
-	else
-		eq.stop_timer('Hardblur');
-		eq.stop_timer('Softblur');
-	end
+	-- memblur removed: the Hardblur/Softblur WipeHateList timers caused the
+	-- NPC to fully de-aggro, path home and OOC-regen to full (unkillable).
 end
 
 function Peregin_Timer(e)
-	if (e.timer == 'Hardblur') then
-        e.self:WipeHateList();
-    elseif (e.timer == 'Softblur') then
-        if (math.random(100)<=10) then
-            e.self:WipeHateList();
-        end
-    end
+	-- memblur removed (see *_Combat).
 end
 
 
@@ -580,23 +585,12 @@ end
 
 
 function Encrusted_Combat(e)
-	if e.joined then
-		eq.set_timer('Hardblur', 180 * 1000);
-		eq.set_timer('Softblur', 6 * 1000);
-	else
-		eq.stop_timer('Hardblur');
-		eq.stop_timer('Softblur');
-	end
+	-- memblur removed: the Hardblur/Softblur WipeHateList timers caused the
+	-- NPC to fully de-aggro, path home and OOC-regen to full (unkillable).
 end
 
 function Encrusted_Timer(e)
-	if (e.timer == 'Hardblur') then
-        e.self:WipeHateList();
-    elseif (e.timer == 'Softblur') then
-        if (math.random(100)<=10) then
-            e.self:WipeHateList();
-        end
-    end
+	-- memblur removed (see *_Combat).
 end
 
 
@@ -666,13 +660,8 @@ function Gorgertwo_Death(e)
 end
 	
 function Mudslinger_Combat(e)
-	if e.joined then
-		eq.set_timer('Hardblur', 180 * 1000);
-		eq.set_timer('Softblur', 6 * 1000);
-	else
-		eq.stop_timer('Hardblur');
-		eq.stop_timer('Softblur');
-	end
+	-- memblur removed: the Hardblur/Softblur WipeHateList timers caused the
+	-- NPC to fully de-aggro, path home and OOC-regen to full (unkillable).
 end
 
 function Mudslinger_HP(e)
@@ -755,12 +744,6 @@ function Monstrous_Timer(e)
 	if not mud_box:contains(e.self:GetX(), e.self:GetY()) then
         e.self:GotoBind();
 		e.self:WipeHateList();
-	elseif (e.timer == 'Hardblur') then
-        e.self:WipeHateList();
-    elseif (e.timer == 'Softblur') then
-        if (math.random(100)<=50) then
-            e.self:WipeHateList();
-        end
     end
 end
 
@@ -773,12 +756,6 @@ function Mudslinger_Timer(e)
 	if not mud_box:contains(e.self:GetX(), e.self:GetY()) then
         e.self:GotoBind();
 		e.self:WipeHateList();
-	elseif (e.timer == 'Hardblur') then
-        e.self:WipeHateList();
-    elseif (e.timer == 'Softblur') then
-        if (math.random(100)<=50) then
-            e.self:WipeHateList();
-        end
     end
 end
 
@@ -846,13 +823,8 @@ function Gorger_Death(e)
 end
 
 function Monstrous_Combat(e)
-	if e.joined then
-		eq.set_timer('Hardblur', 180 * 1000);
-		eq.set_timer('Softblur', 6 * 1000);
-	else
-		eq.stop_timer('Hardblur');
-		eq.stop_timer('Softblur');
-	end
+	-- memblur removed: the Hardblur/Softblur WipeHateList timers caused the
+	-- NPC to fully de-aggro, path home and OOC-regen to full (unkillable).
 end
 
 
@@ -1005,23 +977,12 @@ function Soil_Death(e)
 end
 
 function Soil_Combat(e)
-	if e.joined then
-		eq.set_timer('Hardblur', 180 * 1000);
-		eq.set_timer('Softblur', 6 * 1000);
-	else
-		eq.stop_timer('Hardblur');
-		eq.stop_timer('Softblur');
-	end
+	-- memblur removed: the Hardblur/Softblur WipeHateList timers caused the
+	-- NPC to fully de-aggro, path home and OOC-regen to full (unkillable).
 end
 
 function Soil_Timer(e)
-	if (e.timer == 'Hardblur') then
-        e.self:WipeHateList();
-    elseif (e.timer == 'Softblur') then
-        if (math.random(100)<=10) then
-            e.self:WipeHateList();
-        end
-    end
+	-- memblur removed (see *_Combat).
 end
 
 function Follower_Death(e)
@@ -1043,23 +1004,12 @@ function Follower_Spawn(e)
 end
 
 function Follower_Combat(e)
-	if e.joined then
-		eq.set_timer('Hardblur', 180 * 1000);
-		eq.set_timer('Softblur', 6 * 1000);
-	else
-		eq.stop_timer('Hardblur');
-		eq.stop_timer('Softblur');
-	end
+	-- memblur removed: the Hardblur/Softblur WipeHateList timers caused the
+	-- NPC to fully de-aggro, path home and OOC-regen to full (unkillable).
 end
 
 function Follower_Timer(e)
-	if (e.timer == 'Hardblur') then
-        e.self:WipeHateList();
-    elseif (e.timer == 'Softblur') then
-        if (math.random(100)<=10) then
-            e.self:WipeHateList();
-        end
-    end
+	-- memblur removed (see *_Combat).
 end
 
 
@@ -1100,23 +1050,12 @@ end
 
 
 function Warder_Combat(e)
-	if e.joined then
-		eq.set_timer('Hardblur', 180 * 1000);
-		eq.set_timer('Softblur', 6 * 1000);
-	else
-		eq.stop_timer('Hardblur');
-		eq.stop_timer('Softblur');
-	end
+	-- memblur removed: the Hardblur/Softblur WipeHateList timers caused the
+	-- NPC to fully de-aggro, path home and OOC-regen to full (unkillable).
 end
 
 function Warder_Timer(e)
-	if (e.timer == 'Hardblur') then
-        e.self:WipeHateList();
-    elseif (e.timer == 'Softblur') then
-        if (math.random(100)<=10) then
-            e.self:WipeHateList();
-        end
-    end
+	-- memblur removed (see *_Combat).
 end
 
 function Warder_HP(e)
@@ -1254,43 +1193,21 @@ function Deru_Death(e)
 end
 
 function Deru_Combat(e)
-	if e.joined then
-		eq.set_timer('Hardblur', 180 * 1000);
-		eq.set_timer('Softblur', 6 * 1000);
-	else
-		eq.stop_timer('Hardblur');
-		eq.stop_timer('Softblur');
-	end
+	-- memblur removed: the Hardblur/Softblur WipeHateList timers caused the
+	-- NPC to fully de-aggro, path home and OOC-regen to full (unkillable).
 end
 
 function Deru_Timer(e)
-	if (e.timer == 'Hardblur') then
-        e.self:WipeHateList();
-    elseif (e.timer == 'Softblur') then
-        if (math.random(100)<=50) then
-            e.self:WipeHateList();
-        end
-    end
+	-- memblur removed (see *_Combat).
 end
 
 function Bloodsoaked_Combat(e)
-		if e.joined then
-			eq.set_timer('Hardblur', 180 * 1000);
-			eq.set_timer('Softblur', 6 * 1000);
-		else
-			eq.stop_timer('Hardblur');
-			eq.stop_timer('Softblur');
-		end
+	-- memblur removed: the Hardblur/Softblur WipeHateList timers caused the
+	-- NPC to fully de-aggro, path home and OOC-regen to full (unkillable).
 end
 
 function Bloodsoaked_Timer(e)
-		if (e.timer == 'Hardblur') then
-			e.self:WipeHateList();
-		elseif (e.timer == 'Softblur') then
-			if (math.random(100)<=50) then
-            e.self:WipeHateList();
-        end
-    end
+	-- memblur removed (see *_Combat).
 end
 
 function Bloodsoaked_Death(e)
@@ -1311,13 +1228,8 @@ function Mystical_Arbitorspawn(e)
 end
 
 function Mystical_Combat(e)
-	if e.joined then
-		eq.set_timer('Hardblur', 180 * 1000);
-		eq.set_timer('Softblur', 6 * 1000);
-	else
-		eq.stop_timer('Hardblur');
-		eq.stop_timer('Softblur');
-	end
+	-- memblur removed: the Hardblur/Softblur WipeHateList timers caused the
+	-- NPC to fully de-aggro, path home and OOC-regen to full (unkillable).
 end
 
 
@@ -1325,12 +1237,6 @@ function Mystical_Timer(e)
 	if e.timer == "Mystical" then -- If 1 hour has passed
 		eq.stop_timer('Mystical'); -- Stop timer
 		eq.depop(); -- Depop myself
-	elseif (e.timer == "Hardblur") then
-		e.self:WipeHateList();
-	elseif (e.timer == "Softblur") then
-		if(math.random(100)<=25) then
-			e.self:WipeHateList();
-		end
 	end
 end
 
@@ -1366,6 +1272,7 @@ function event_encounter_load(e)
 	
 	eq.register_npc_event('Rings', Event.spawn, 218049,					Pereginspawnone_Spawn);
 	eq.register_npc_event('Rings', Event.spawn, 218029,					Placeholder_Spawn);
+	eq.register_npc_event('Rings', Event.spawn, 218094,					FinalTrigger_Spawn);
 	
 	eq.register_npc_event('Rings', Event.timer, 218049,					Pereginspawnone_Timer);
 	

@@ -78,7 +78,8 @@ function event_timer(e)
             e.self:CastedSpellFinished(5002, e.self:GetHateRandom()); -- Manablast (5002)
             e.self:Emote("Assaults his foe with a blast of tainted mana!");
           elseif (rand < 70) and (rand >= 55) then -- 15 % to cast
-            e.self:CastedSpellFinished(5004, e.self:GetHateRandom()); -- Tamuik's Suggestion (5004)
+            -- Ascendant: unresistable charm removed (no banish / death touch / unresistable charm policy)
+            -- e.self:CastedSpellFinished(5004, e.self:GetHateRandom()); -- Tamuik's Suggestion (5004)
             e.self:Say("You! You're mine to control now!");
           end
 	elseif (spell_set == 4) then

@@ -1,21 +1,20 @@
-/*	EQEMu: Everquest Server Emulator
-	Copyright (C) 2001-2016 EQEMu Development Team (http://eqemulator.org)
+/*	EQEmu: EQEmulator
+
+	Copyright (C) 2001-2026 EQEmu Development Team
 
 	This program is free software; you can redistribute it and/or modify
 	it under the terms of the GNU General Public License as published by
-	the Free Software Foundation; version 2 of the License.
+	the Free Software Foundation; either version 3 of the License, or
+	(at your option) any later version.
 
 	This program is distributed in the hope that it will be useful,
-	but WITHOUT ANY WARRANTY except by those people which sell it, which
-	are required to give you total support for your newly bought product;
-	without even the implied warranty of MERCHANTABILITY or FITNESS FOR
-	A PARTICULAR PURPOSE. See the GNU General Public License for more details.
+	but WITHOUT ANY WARRANTY; without even the implied warranty of
+	MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+	GNU General Public License for more details.
 
 	You should have received a copy of the GNU General Public License
-	along with this program; if not, write to the Free Software
-	Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
+	along with this program. If not, see <http://www.gnu.org/licenses/>.
 */
-
 #ifndef RULE_CATEGORY
 #define RULE_CATEGORY(name)
 #endif
@@ -132,6 +131,13 @@ RULE_INT(Character, MinStatusForNoDropExemptions, 80, "This allows status x and 
 RULE_INT(Character, SkillCapMaxLevel, 75, "Sets the Maximum Level used for Skill Caps (from skill_caps table). -1 makes it use MaxLevel rule value. It is set to 75 because PEQ only has skill caps up to that level, and grabbing the players' skill past 75 will return 0, breaking all skills past that level. This helps servers with obsurd level caps (75+ level cap) function without any modifications")
 RULE_INT(Character, StatCap, 0, "If StatCap > 0 then this value is used. If it is 0, the value of the following code is used: If Level < 61: 255. If Level >= 61 and the client SoF or newer: 255 + 5 x (level -60).  If the client is older than SoF and the level < 71 then: 255 + x (level-60). In all other cases: 330.")
 RULE_BOOL(Character, CheckCursorEmptyWhenLooting, true, "If true, a player cannot loot a corpse (player or NPC) with an item on their cursor")
+RULE_BOOL(Character, EnableAdvancedLoot, true, "If true, TOB+ clients with Use Advanced Looting on loot NPC kills from the Advanced Loot window (solo, or groups/raids where everyone uses it)")
+RULE_INT(Character, AdvancedLootUnlockSeconds, 600, "Advanced Loot: how long the window keeps a corpse reserved for its group/killer before it unlocks for everyone (0 = use NPC:CorpseUnlockTimer); the corpse is kept at least 2 minutes longer")
+RULE_INT(Character, AdvancedLootAskSeconds, 60, "Advanced Loot: how long a master looter's need/greed ask runs before it completes or auto-rolls (Live: 60)")
+RULE_BOOL(Character, AdvancedLootActions, false, "Advanced Loot (TOB+): Sell and Store (Tradeskill Depot or Dragon's Hoard) actions from the loot window; needs the client-side buttons")
+RULE_INT(Character, AdvancedLootPresenceRange, 500, "Advanced Loot: group/raid members farther than this from the corpse at the kill must right-click it before looting (0 = off)")
+RULE_BOOL(Character, ToBLevelUpAppearance, false, "On a player's level-up, nearby TOB+ clients get the level-up appearance (their client shows the level-up effect and 'Ding!')")
+RULE_INT(Character, ToBNameplateVitalsRange, 0, "TOB+ clients get the HP and mana percent of NPCs within this distance even when they do not target them, for the client-side nameplate bars (0 = off; limited by Range:MobCloseScanDistance)")
 RULE_BOOL(Character, MaintainIntoxicationAcrossZones, true, "If true, alcohol effects are maintained across zoning and logging out/in")
 RULE_BOOL(Character, EnableDiscoveredItems, true, "If enabled, it enables EVENT_DISCOVER_ITEM and also saves character names and timestamps for the first time an item is discovered")
 RULE_BOOL(Character, EnableXTargetting, true, "Enable Extended Targeting Window, for users with UF and later clients")
@@ -232,6 +238,13 @@ RULE_INT(Character, MendAlwaysSucceedValue, 199, "Value at which mend will alway
 RULE_BOOL(Character, SneakAlwaysSucceedOver100, false, "When sneak skill is over 100, always succeed sneak/hide. Default: false")
 RULE_INT(Character, BandolierSwapDelay, 0, "Bandolier swap delay in milliseconds, default is 0")
 RULE_BOOL(Character, EnableHackedFastCampForGM, false, "Enables hacked fast camp for GM clients, if the GM doesn't have a hacked client they'll camp like normal")
+RULE_BOOL(Character, EnableFastCamp, true, "ToB+ clients get the 'Fast camp now?' prompt (and instant /camp fast) in cities, no-combat zones and Character:FastCampZones")
+RULE_STRING(Character, FastCampZones, "", "Comma-separated zone short names that also allow fast camp for ToB+ clients")
+RULE_BOOL(Character, KeyRingsUnlockedByDefault, true, "TOB+ key rings a character has not been given or denied by a quest (UnlockKeyRing/LockKeyRing) count as unlocked")
+RULE_INT(Character, LeadershipMinGroupSize, 3, "Group (or raid group) size leadership abilities need: inspect buffs and the leadership AA bonuses, and a group's NPC marks are cleared when it drops below this. Live: 3. Below 3, ToB+ clients need a client-side override (dinput8 hook) to apply the leadership HP/mana/regen too, or their own HP/mana display and regen fall out of sync with the server")
+RULE_BOOL(Character, SoloMarkNPC, false, "Let an ungrouped player /mark NPCs (TOB+ clients send /mark when ungrouped). The marks are shown only to that player")
+RULE_BOOL(Character, ToBLeadershipAlwaysOn, true, "ToB+ clients cannot buy leadership AAs: groups and raids led by one get every leadership ability at max rank (the player profile is not changed)")
+RULE_BOOL(Character, LeadershipStatBonusesForToB, false, "Give ToB+ clients the leadership stat bonuses (Health/Mana Enhancement, Health Regeneration, Offense Enhancement). Live removed them and the ToB client does not count them, so turning this on puts the client HP/mana display and regen out of sync unless the client is patched (dinput8 hook)")
 RULE_BOOL(Character, AlwaysAllowNameChange, false, "Enable this option to allow /changename to work without enabling a name change via scripts.")
 RULE_BOOL(Character, EnableAutoAFK, false, "Enable or disable the auto AFK feature, cuts down on packet spam")
 RULE_BOOL(Character, AutoIdleFilterPackets, true, "Enable or disable filtering packets when auto AFK is enabled, heavily cuts down on packet spam in zones with lots of players")
@@ -241,6 +254,15 @@ RULE_INT(Character, SecondsBeforeAFKCombatZone, 1800, "Seconds before a player i
 RULE_INT(Character, SecondsBeforeAFKNonCombatZone, 600, "Seconds before a player is considered AFK in non-combat zones (600 = 10 minutes)")
 RULE_INT(Character, IdleShrinkSize, 0, "Size to shrink idle players and their pets to (0 = disabled). Uses unrestricted sizing.")
 RULE_BOOL(Character, DisableEXPWhenIdle, false, "Disable experience gain for players while they are idle. Re-enables automatically when they move again.")
+RULE_BOOL(Character, EnableItemOverflow, true, "TOB+ clients: items queued behind the cursor are shown in the Item Overflow window (/itemoverflow)")
+RULE_BOOL(Character, EnableKeyRings, true, "TOB+ clients: enable the key rings (mount, illusion, familiar, Hero's Forge, teleportation and activated items)")
+RULE_INT(Character, KeyRingSlots, 100, "TOB+ clients: slots in each key ring (the client caps illusion at 300, familiar at 450, teleportation at 250, the others at 500)")
+RULE_INT(Character, DragonHoardSlots, 50, "TOB+ clients: rows in the Dragon's Hoard, extra storage used at a banker (0 = off, at most 2000)")
+RULE_INT(Character, TradeskillDepotSlots, 0, "TOB+ clients: different items the Tradeskill Depot holds (0 = off; Live gives 250)")
+RULE_BOOL(Character, EnableAchievements, false, "TOB+ clients: track achievements and collections and show them in the achievement window (needs the achievement content tables loaded)")
+RULE_INT(Character, AchievementFileTime, 0, "TOB+ clients: newest modification time (unix seconds) of the client's Resources/Achievements files; the client only loads them when this matches")
+RULE_BOOL(Character, EnableMarketplace, false, "TOB+ clients: offer the marketplace_offers items in the Marketplace window, paid from account_marketplace_funds (price 0 = free)")
+RULE_INT(Character, MarketplaceMaxCoins, 100000, "TOB+ clients: most Marketplace Coins an account can hold; grants above it are capped")
 RULE_CATEGORY_END()
 
 RULE_CATEGORY(Mercs)
@@ -258,6 +280,7 @@ RULE_BOOL(Mercs, AllowMercSuspendInCombat, true, "Allow merc suspend in combat")
 RULE_BOOL(Mercs, MercsIgnoreLevelBasedHasteCaps, false, "Ignores hard coded level based haste caps.")
 RULE_INT(Mercs, MercsHasteCap, 100, "Haste cap for non-v3(over haste) haste")
 RULE_INT(Mercs, MercsHastev3Cap, 25, "Haste cap for v3(over haste) haste")
+RULE_INT(Mercs, MaxMercSlots, 6, "Maximum number of mercenary slots per character (max = MAXMERCS)")
 RULE_CATEGORY_END()
 
 RULE_CATEGORY(Guild)
@@ -354,7 +377,7 @@ RULE_STRING(World, MOTD, "", "Server MOTD sent on login, change from empty to ha
 RULE_STRING(World, Rules, "", "Server Rules, change from empty to have this be used instead of variables table 'rules' value, lines are pipe (|) separated, example: A|B|C")
 RULE_BOOL(World, EnableAutoLogin, false, "Enables or disables auto login of characters, allowing people to log characters in directly from loginserver to ingame")
 RULE_BOOL(World, EnablePVPRegions, true, "Enables or disables PVP Regions automatically setting your PVP flag")
-RULE_STRING(World, SupportedClients, "RoF2", "Comma-delimited list of clients to restrict to. Supported values are Titanium | SoF | SoD | UF | RoF | RoF2. Example: Titanium,RoF2")
+RULE_STRING(World, SupportedClients, "RoF2,TOB", "Comma-delimited list of clients to restrict to. Supported values are Titanium | SoF | SoD | UF | RoF | RoF2 | TOB. Example: Titanium,RoF2,TOB")
 RULE_STRING(World, CustomFilesKey, "", "Enable if the server requires custom files and sends a key to validate. Empty string to disable. Example: eqcustom_v1")
 RULE_STRING(World, CustomFilesUrl, "github.com/knervous/eqnexus/releases", "URL to display at character select if client is missing custom files")
 RULE_INT(World, CustomFilesAdminLevel, 20, "Admin level at which custom file key is not required when CustomFilesKey is specified")
@@ -362,6 +385,7 @@ RULE_BOOL(World, RealTimeCalculateGuilds, false, "(Temp feature flag) If true, g
 RULE_BOOL(World, EnableLoginserverAccountLinking, true, "When enabled, if a loginserver account ID is not found, attempts to link by account name with IP validation from account_ip history")
 RULE_INT(World, MaxPlayersPerIPForLoginServer, -1, "Max players counted per unique IP when reporting online count to the loginserver. -1 disables (reports all)")
 RULE_BOOL(World, ExcludeBazaarPlayersFromLoginServerCount, true, "If true, players in the Bazaar zone (ID 151) are excluded from the online count reported to the loginserver")
+RULE_INT(World, Id, 100, "Used by later clients to create GUIDs, expected to be Unique to the world but ultimately not that important")
 RULE_CATEGORY_END()
 
 RULE_CATEGORY(Zone)
@@ -371,7 +395,6 @@ RULE_STRING(Zone, PreConnectCrashRecoveryZones, "all", "Comma-delimited zone IDs
 RULE_INT(Zone, PreConnectCrashRecoveryZoneID, 152, "Zone ID where clients are saved when pre-connect crash recovery triggers. Default 152 is Nexus. Set to 0 to disable movement.")
 RULE_STRING(Zone, FastLinkdeadCleanupZones, "344", "Comma-delimited zone IDs where fully connected linkdead clients use FastLinkdeadCleanupMS instead of ClientLinkdeadMS. Use empty to disable or 'all' for every zone.")
 RULE_INT(Zone, FastLinkdeadCleanupMS, 5000, "The time a fully connected client remains link dead in FastLinkdeadCleanupZones (milliseconds). Set to 0 for immediate cleanup.")
-RULE_STRING(Zone, DelayMassSpawnUnsafeBulkSpawnsZones, "all", "Comma-delimited zone IDs where mass-spawn-unsafe spawns (pets, mercs, illusion-race clients, exotic NPC races, bad sizes) are sent as individual delayed spawn packets after CLIENT_CONNECTED instead of in the bulk OP_ZoneSpawns packet, preventing client crashes during the zone-in actor-load pass. Use empty to disable or 'all' for every zone.")
 RULE_INT(Zone, GraveyardTimeMS, 1200000, "Time until a player corpse is moved to a zone's graveyard, if one is specified for the zone (milliseconds)")
 RULE_BOOL(Zone, EnableShadowrest, 1, "Enables or disables the Shadowrest zone feature for player corpses. Default is turned on")
 RULE_INT(Zone, AutoShutdownDelay, 60000, "How long a dynamic zone stays loaded while empty (milliseconds)")
@@ -510,6 +533,7 @@ RULE_REAL(Spells, BreakSneakWhenCastOn, 2.0, "Percentage that Sneak will break w
 RULE_BOOL(Spells, EnableResistSoftCap, false, "Enabled resist softcap and can be adjusted by rule, SpellResistSoftCap")
 RULE_INT(Spells, SpellResistSoftCap, 255, "Softcap for spell resists.")
 RULE_INT(Spells, MaxDamageSpellPartialResist, 95, "Maximum partial resist percentage for damage spells (DD/DoT). At 95, damage spells always land with at least 5 percent effectiveness. Set to 100 to allow full resists (default behavior).")
+RULE_BOOL(Spells, ClientPetDamageSpellPartialResistCap, true, "If true, client/bot-owned summoned, temporary, and charmed pets use Spells:MaxDamageSpellPartialResist for partial-resistable damage spells.")
 RULE_BOOL(Spells, AllowItemTGB, false, "Target group buff (/tgb) doesn't work with items on live, custom servers want it though")
 RULE_BOOL(Spells, NPCInnateProcOverride, true, "NPC innate procs override the target type to single target")
 RULE_BOOL(Spells, OldRainTargets, false, "Use old incorrectly implemented maximum targets for rains")
@@ -554,6 +578,8 @@ RULE_BOOL(Spells, UseClassicHarmTouchDamage, false, "Use pre 2007 Harm Touch cal
 RULE_BOOL(Spells, UseClassicSpellFocus, false, "Enabling will tell the server to handle random focus damage as classic spell imports lack the limit values.")
 RULE_BOOL(Spells, ManaTapsOnAnyClass, false, "Enabling this will allow you to cast mana taps on any class, this will bypass ManaTapsRequireNPCMana rule.")
 RULE_INT(Spells, HealAmountMessageFilterThreshold, 100, "Lifetaps below this threshold will not have a message sent to the client (Heal will still process) 0 to Disable.")
+RULE_BOOL(Spells, ToBHealMessages, false, "TOB+ clients get heals they cast or receive as the client's own heal message (live chat line and floating heal number) instead of the older heal strings")
+RULE_INT(Spells, ToBOtherHealMessageRange, 0, "TOB+ clients also get heal messages for other people's heals within this distance (0 = off; needs Spells:ToBHealMessages; uses the PC/NPC spell filters)")
 RULE_BOOL(Spells, SnareOverridesSpeedBonuses, false, "Enabling will allow snares to override any speed bonuses the entity may have. Default: False")
 RULE_INT(Spells, TargetedAOEMaxTargets, 4, "Max number of targets a Targeted AOE spell can cast on. Set to 0 for no limit.")
 RULE_INT(Spells, PointBlankAOEMaxTargets, 0, "Max number of targets a Point-Blank AOE spell can cast on. Set to 0 for no limit.")
@@ -1018,6 +1044,8 @@ RULE_INT(AA, ModernAAScalingAALimit, 4000, "The number of earned AA when AA expe
 RULE_BOOL(AA, SoundForAAEarned, false, "Play sound when AA point earned")
 RULE_INT(AA, UnusedAAPointCap, -1, "Cap for Unused AA Points.  Default: -1.  NOTE: DO NOT LOWER THIS WITHOUT KNOWING WHAT YOU ARE DOING. MAY RESULT IN PLAYERS LOSING AAs.")
 RULE_INT(AA, MaxAAEXPPerKill, -1, "Maximum AA EXP per Kill (3425214 is about 7%) - Default: -1 will disable the check")
+RULE_BOOL(AA, GrantVeteranAAs, false, "Grant the veteran reward AAs (Lesson of the Devoted, Throne of Heroes...) at zone-in by account age, one per year like Live")
+RULE_INT(AA, VeteranAAYearsOverride, -1, "If 0 or more, treat every account as this many years old for the veteran reward AAs")
 RULE_CATEGORY_END()
 
 RULE_CATEGORY(Console)
@@ -1195,6 +1223,8 @@ RULE_BOOL(EvolvingItems, DestroyAugmentsOnEvolve, false, "If this is enabled, an
 RULE_CATEGORY_END()
 
 RULE_CATEGORY(Ascendant)
+RULE_BOOL(Ascendant, FadeDetrimentalBuffsOutOfCombat, false,
+	"[Ascendant] When a player is fully out of combat (no aggro and the rest timer has fully expired, not just the post-combat countdown), remove detrimental spell effects that are not flagged allow_rest.")
 // --- Pet survivability ---
 RULE_REAL(Ascendant, PetHPScalar, 1.5,
 	"[Ascendant] Multiplier on summoned pet base HP at spawn. 1.0 = no change, 1.5 = +50%. Applied in MakePoweredPet before AA bonuses.")

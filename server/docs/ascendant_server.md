@@ -340,6 +340,52 @@ Only gates spawn2/objects/merchantlist. Zone entry is gated by `min_status` and 
 
 ---
 
+## Legacy of Ykesha Release (2026-09)
+
+Manual gate release (no community event). LoY = `zone.expansion = 5`; gated
+only by `Expansion:CurrentExpansion` (4 -> 5). `nedaria` additionally had a
+custom `min_status = 20`.
+
+### Zones
+| ID | Zone | Notes |
+|----|------|-------|
+| 182 | nedaria | Hub. Treated as **classic** for loot/scaling (like bazaar/jaggedpine) |
+| 224 | gunthak | L35-50 nameds |
+| 225 | dulak | Captain Varns, Quigli (nameds — not raid per Ali) |
+| 226 | torgiran | Event bosses Overseer Wrank / Overlord Ngrub as rares |
+| 227 | nadox | Luggald Broodmother + #Innoruuk (raid, scripted events); Spiritseeker Nadox, Bloodspear (nameds) |
+| 228 | hatesfury | #Captain_Krasnok (raid, script-spawned); ship nameds as rares |
+| 277 | chardokb | #Korucust (raid) |
+| 278 | soldungc | #Culthor_the_Gatekeeper (named — not raid per Ali) |
+
+### Quest-side integration (done)
+- `plugins/ascendant_encounter_scaling_loy.pl` — resist-only (PoP style), kill switch `$LOY_SCALING_ENABLED`
+- `global/global_npc.pl` — `LoyScaling_OnEngage/OnDisengage/Rescan` dispatch, `IsLoyScalingZone` exclusion (line ~149), `'loy'` added to raid level-block loot gate (line ~337)
+- `plugins/ascendant_loot_utils.pl` — `'loy'` appended to `active_expansions()` (after `pop`, so it uses the DB rare_spawn loottable roll), dispatch branches added
+- `plugins/ascendant_loot_pools.pl` — `loy_zone_ids`, `loy_rare_pools` (empty, DB roll), `loy_level_blocks` (1-44 / 45-53 / 54-59 / 60+), `loy_raid_pools` (block 1 <=65: Nadox + Hate's Fury drops; block 2 66+: Korucust/Varns/Culthor), `loy_raid_level_blocks`
+- `plugins/ascendant_expedition_config.pl` — all 8 zones; raid tier on nadox, hatesfury, chardokb (rev 3, 2026-09-25)
+
+### DB scripts (`server/sql/`, apply in order, each has a rollback)
+
+**Status 2026-09-25:** steps 1, 2 and 3 APPLIED (flags: 160 rare / 5 raid; 8 Tyrael spawns; rule 4->5 + nedaria min_status 0 at 21:36, live on the following reboot). GMs with `#gm on` bypass the expansion check and can test LoY zones before release. Table backup: `backup/loy_prep_20260925/`.
+1. `2026_09_04_loy_named_flags.sql` (rev 3) — raid_target = Ali's list only (Korucust, Krasnok, Broodmother x2, Innoruuk); Varns, Quigli, Spiritseeker Nadox x2, Bloodspear, Culthor are `rare_spawn`. 156 listed `rare_spawn` in three data-driven tiers (A: shared-slot chance<=50 in multi-entry spawngroup, B: static 100% named with own loottable, C: script-spawned event nameds — mirrors PoP's 156/132/123 split) + 4 demoted raid_targets = 160 rare, 5 raid, un-flags trigger NPCs 228118 `#spell_target` and 227330 `_` (would otherwise be depopped in Normal expeditions and break Hate's Fury / Nadox events). 80%-slot `#` NPCs (the *common* entry) and quest NPCs deliberately excluded; opt-in block at the bottom.
+2. `2026_09_04_loy_planeshifter_tyrael_spawns.sql` — Tyrael (npc 186202) at each zone's safe point
+3. `2026_09_04_loy_gate_release.sql` — rule 4 -> 5, nedaria `min_status = 0`; then `#reload content_flags global` (reloads rules + expansion in world and all zones), `#reload merchants global`, `#reload zone_data global`, and `#repop` in cazicthule (285 LoY-era spawns turn on there)
+
+Already applied (2026-09-25): `2026_09_25_loy_raid_ascendant_boost.sql` — T3 (+700000) of the 46 `loy_raid_pools` items raised to PoP-by-boss-level (block 1 -> PoP1, block 2 -> PoP2 + Luclin block-4 heroic pass). Items live in shared memory: takes effect at the next normal restart (never `#hotfix`).
+
+### Adding an expansion — checklist (reuse for GoD)
+1. New `plugins/ascendant_encounter_scaling_<exp>.pl` (copy pop module, rename `Pop`->`<Exp>`, `POP_`->`<EXP>_`, `_pop_`->`_<exp>_`, replace zone map)
+2. `global_npc.pl`: add `<Exp>Scaling_*` to EVENT_COMBAT (engage + disengage), EVENT_TIMER rescan, and the `Is<Exp>ScalingZone` exclusion in EVENT_SPAWN
+3. `ascendant_loot_utils.pl`: `active_expansions()`, `_expansion_{pool,blocks,zone,raid_pool,raid_blocks}_dispatch`
+4. `ascendant_loot_pools.pl`: `<exp>_zone_ids`, `<exp>_rare_pools`, `<exp>_level_blocks`, `<exp>_raid_pools`, `<exp>_raid_level_blocks`; check the zone isn't already claimed by an earlier expansion's zone_ids (first match wins)
+5. `global_npc.pl` line ~337: add `<exp>` to the raid level-block loot gate
+6. `ascendant_expedition_config.pl`: zone entries + `has_raid_tier`
+7. SQL: `rare_spawn`/`raid_target` flags (PEQ ships few), un-flag `raid_target` on trigger NPCs, Tyrael spawns, rule bump
+8. `ascendant_insight_trainer.pl` `$CURRENT_MAX_EXPANSION` if the expansion adds AAs
+
+---
+
 ## GM Command Audit Logging
 
 **Hook:** `EVENT_GM_COMMAND` in `quests/global/global_player.pl`

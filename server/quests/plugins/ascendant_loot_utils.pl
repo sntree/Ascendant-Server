@@ -12,7 +12,7 @@
 # priority (later expansions override earlier ones for overlapping ranges).
 
 sub active_expansions {
-    return ('classic', 'kunark', 'velious', 'ldon', 'luclin', 'pop');
+    return ('classic', 'kunark', 'velious', 'ldon', 'luclin', 'pop', 'loy', 'god');
 }
 
 #=============================================================================
@@ -61,6 +61,8 @@ sub _expansion_pool_dispatch {
     if ($exp eq 'ldon')    { return plugin::ldon_rare_pools(); }
     if ($exp eq 'luclin')  { return plugin::luclin_rare_pools(); }
     if ($exp eq 'pop')     { return plugin::pop_rare_pools(); }
+    if ($exp eq 'loy')     { return plugin::loy_rare_pools(); }
+    if ($exp eq 'god')     { return plugin::god_rare_pools(); }
     return undef;
 }
 
@@ -72,6 +74,8 @@ sub _expansion_blocks_dispatch {
     if ($exp eq 'ldon')    { return plugin::ldon_level_blocks(); }
     if ($exp eq 'luclin')  { return plugin::luclin_level_blocks(); }
     if ($exp eq 'pop')     { return plugin::pop_level_blocks(); }
+    if ($exp eq 'loy')     { return plugin::loy_level_blocks(); }
+    if ($exp eq 'god')     { return plugin::god_level_blocks(); }
     return undef;
 }
 
@@ -91,6 +95,8 @@ sub _expansion_zone_dispatch {
     if ($exp eq 'ldon')    { return plugin::ldon_zone_ids(); }
     if ($exp eq 'luclin')  { return plugin::luclin_zone_ids(); }
     if ($exp eq 'pop')     { return plugin::pop_zone_ids(); }
+    if ($exp eq 'loy')     { return plugin::loy_zone_ids(); }
+    if ($exp eq 'god')     { return plugin::god_zone_ids(); }
     return undef;
 }
 
@@ -99,6 +105,8 @@ sub _expansion_raid_pool_dispatch {
     if ($exp eq 'velious') { return plugin::velious_raid_pools(); }
     if ($exp eq 'luclin')  { return plugin::luclin_raid_pools(); }
     if ($exp eq 'pop')     { return plugin::pop_raid_pools(); }
+    if ($exp eq 'loy')     { return plugin::loy_raid_pools(); }
+    if ($exp eq 'god')     { return plugin::god_raid_pools(); }
     return undef;
 }
 
@@ -107,12 +115,15 @@ sub _expansion_raid_blocks_dispatch {
     if ($exp eq 'velious') { return plugin::velious_raid_level_blocks(); }
     if ($exp eq 'luclin')  { return plugin::luclin_raid_level_blocks(); }
     if ($exp eq 'pop')     { return plugin::pop_raid_level_blocks(); }
+    if ($exp eq 'loy')     { return plugin::loy_raid_level_blocks(); }
+    if ($exp eq 'god')     { return plugin::god_raid_level_blocks(); }
     return undef;
 }
 
 sub _expansion_raid_overrides_dispatch {
     my $exp = shift;
     if ($exp eq 'pop') { return plugin::pop_raid_block_overrides(); }
+    if ($exp eq 'god') { return plugin::god_raid_block_overrides(); }
     return undef;
 }
 
@@ -167,6 +178,12 @@ sub excluded_bonus_loot_item_ids {
 
         # PoP key/flag items must come from their intended source, never bonus loot.
         9433   => 1, # Symbol of Torden (Agnarr's Tower key, bothunder)
+
+        # GoD Uqua trinkets (block the Aura of Destruction) — never bonus loot (owner 2026-09-26).
+        67736  => 1, 67737  => 1, 67738  => 1, 67739  => 1,
+        367736 => 1, 367737 => 1, 367738 => 1, 367739 => 1,
+        567736 => 1, 567737 => 1, 567738 => 1, 567739 => 1,
+        767736 => 1, 767737 => 1, 767738 => 1, 767739 => 1,
 
         310652 => 1, 510652 => 1, 710652 => 1,
         314383 => 1, 514383 => 1, 714383 => 1,
@@ -383,6 +400,9 @@ sub _rare_pool_zone_ids {
     my @zone_ids = sort { $a <=> $b } keys %$zones;
     if ($zone_exp eq 'pop') {
         @zone_ids = grep { $_ != 202 && $_ != 203 } @zone_ids; # exclude PoK/PoTranq hubs
+    }
+    if ($zone_exp eq 'god') {
+        @zone_ids = grep { $_ != 279 } @zone_ids; # exclude Abysmal Sea hub
     }
 
     return @zone_ids;

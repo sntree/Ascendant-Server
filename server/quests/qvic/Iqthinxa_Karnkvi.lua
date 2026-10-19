@@ -109,7 +109,7 @@ function CheckRavs()
 			if (r1mob.valid and r1mob:IsClient()) then
 				local r1ht = r1mob:CastToClient()
 				if (r1ht.valid) then
-					r1ht:MovePC(295,171,342,-418,336)
+					r1ht:MovePCInstance(295, eq.get_zone_instance_id(),171,342,-418,336)
 				end
 			end
      	end
@@ -121,7 +121,7 @@ function CheckRavs()
 			if (r2mob.valid and r2mob:IsClient()) then
 				local r2ht = r2mob:CastToClient()
 				if (r2ht.valid) then
-					r2ht:MovePC(295,171,342,-418,336)
+					r2ht:MovePCInstance(295, eq.get_zone_instance_id(),171,342,-418,336)
 				end
 			end
      	end
@@ -133,7 +133,7 @@ function CheckRavs()
 			if (r3mob.valid and r3mob:IsClient()) then
 				local r3ht = r3mob:CastToClient()
 				if (r3ht.valid) then
-					r3ht:MovePC(295,171,342,-418,336)
+					r3ht:MovePCInstance(295, eq.get_zone_instance_id(),171,342,-418,336)
 				end
 			end
      	end

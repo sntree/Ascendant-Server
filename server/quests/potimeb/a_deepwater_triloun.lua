@@ -1,3 +1,5 @@
+local charm_credit = require("potimeb_charm_credit");
+
 --aa_deepwater_triloun
 --Phase 1 - Anar of Water Trial
 --potimeb
@@ -9,6 +11,13 @@ function event_spawn(e)
 end
 
 function event_death_complete(e)
-	-- send a signal to the #water_trigger that I died
-	eq.signal(223172,1);
+	charm_credit.death(e, { {223172, 1} });
+end
+
+function event_charm_start(e)
+	charm_credit.charm_start(e, { {223172, 1} });
+end
+
+function event_charm_end(e)
+	charm_credit.charm_end(e);
 end

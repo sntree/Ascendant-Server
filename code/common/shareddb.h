@@ -1,23 +1,20 @@
-/**
- * EQEmulator: Everquest Server Emulator
- * Copyright (C) 2001-2020 EQEmulator Development Team (https://github.com/EQEmu/Server)
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; version 2 of the License.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY except by those people which sell it, which
- * are required to give you total support for your newly bought product;
- * without even the implied warranty of MERCHANTABILITY or FITNESS FOR
- * A PARTICULAR PURPOSE. See the GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
- *
- */
+/*	EQEmu: EQEmulator
 
+	Copyright (C) 2001-2026 EQEmu Development Team
+
+	This program is free software; you can redistribute it and/or modify
+	it under the terms of the GNU General Public License as published by
+	the Free Software Foundation; either version 3 of the License, or
+	(at your option) any later version.
+
+	This program is distributed in the hope that it will be useful,
+	but WITHOUT ANY WARRANTY; without even the implied warranty of
+	MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+	GNU General Public License for more details.
+
+	You should have received a copy of the GNU General Public License
+	along with this program. If not, see <http://www.gnu.org/licenses/>.
+*/
 #pragma once
 
 #include "common/database.h"
@@ -95,6 +92,22 @@ public:
 		std::list<EQ::ItemInstance *>::const_iterator &end
 	);
 	bool SaveInventory(uint32 char_id, const EQ::ItemInstance *inst, int16 slot_id);
+	bool SaveDragonHoardMove(
+		uint32 char_id,
+		int16 hoard_slot_id,
+		const EQ::ItemInstance *hoard_inst,
+		std::list<EQ::ItemInstance *>::const_iterator &cursor_start,
+		std::list<EQ::ItemInstance *>::const_iterator &cursor_end
+	);
+	// TOB+ Tradeskill Depot rows (item id -> quantity, 0 deletes the row)
+	bool SaveTradeskillDepotRows(uint32 char_id, const std::map<uint32, uint32> &rows);
+	bool SaveTradeskillDepotMove(
+		uint32 char_id,
+		uint32 item_id,
+		uint32 quantity,
+		std::list<EQ::ItemInstance *>::const_iterator &cursor_start,
+		std::list<EQ::ItemInstance *>::const_iterator &cursor_end
+	);
 	bool DeleteSharedBankSlot(uint32 char_id, int16 slot_id);
 	bool DeleteInventorySlot(uint32 char_id, int16 slot_id);
 	bool UpdateInventorySlot(uint32 char_id, const EQ::ItemInstance *inst, int16 slot_id);
@@ -155,6 +168,7 @@ public:
 		uint32 ornament_hero_model = 0
 	);
 	EQ::ItemInstance *CreateBaseItem(const EQ::ItemData *item, int16 charges = 0);
+	bool ReserveItemSerialBlock(int32 &start, int32 &end);
 
 	void GetItemsCount(int32& item_count, uint32& max_id);
 	void LoadItems(void *data, uint32 size, int32 items, uint32 max_item_id);
@@ -185,6 +199,7 @@ public:
 	}
 
 protected:
+	bool WriteTradeskillDepotRows(uint32 char_id, const std::map<uint32, uint32> &rows);
 
 	std::unique_ptr<EQ::MemoryMappedFile>                        skill_caps_mmf;
 	std::unique_ptr<EQ::MemoryMappedFile>                        items_mmf;

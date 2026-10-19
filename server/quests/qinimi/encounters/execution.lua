@@ -58,7 +58,7 @@ elseif (e.timer == "ejecttimer") then
             		local client_e = eq.get_entity_list():GetClientByCharID(client_id);
             		if (client_e ~= nil and client_e.valid) then
 						if (client_e:CalculateDistance(trial_x, trial_y, trial_z) <= 180) then
-                		client_e:MovePC( 281, -1515, -289, -14, 60 ); -- Zone: qinimi
+                		client_e:MovePCInstance(281, eq.get_zone_instance_id(), -1515, -289, -14, 60 ); -- Zone: qinimi
                 		client_e:Message(MT.BrightBlue, "A mysterious force translocates you.");
 						end
             		end
@@ -133,7 +133,7 @@ if (e.message:findi("i wish to enter")) then
 					trial_group_id = trial_group:GetID();
 				else
 					client_id = e.other:CharacterID();
-					e.other:MovePC(281, -480, -1789, 78, 256); -- Zone: qinimi
+					e.other:MovePCInstance(281, eq.get_zone_instance_id(), -480, -1789, 78, 256); -- Zone: qinimi
 				end
 
 				-- Set a variable to indicate the Trial is unavailable.
@@ -163,7 +163,7 @@ function MoveGroup(trial_group, src_x, src_y, src_z, distance, tgt_x, tgt_y, tgt
 					-- check the distance and port them up if close enough
 					if (client_v:CalculateDistance(src_x, src_y, src_z) <= distance) then
 						-- port the player up
-						client_v:MovePC(281, tgt_x, tgt_y, tgt_z, tgt_h); -- Zone: qinimi
+						client_v:MovePCInstance(281, eq.get_zone_instance_id(), tgt_x, tgt_y, tgt_z, tgt_h); -- Zone: qinimi
 
 					end
 				end

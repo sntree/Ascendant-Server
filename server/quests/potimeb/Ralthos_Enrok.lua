@@ -1,3 +1,5 @@
+local charm_credit = require("potimeb_charm_credit");
+
 --Ralthos_Enrok (223127)
 --Phase 2 Undead
 --potimeb
@@ -23,8 +25,15 @@ function event_timer(e)
 end
 
 function event_death_complete(e)
-	eq.signal(223097,223127); -- Add Loot Lockout for Phase 2 Wing
-	eq.signal(223242,2); --signal phase_two_undead
+	charm_credit.death(e, { {223097, 223127}, {223242, 2} });
+end
+
+function event_charm_start(e)
+	charm_credit.charm_start(e, { {223097, 223127}, {223242, 2} });
+end
+
+function event_charm_end(e)
+	charm_credit.charm_end(e);
 end
 
 function event_hp(e)

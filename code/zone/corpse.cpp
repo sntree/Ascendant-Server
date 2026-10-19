@@ -1,3 +1,20 @@
+/*	EQEmu: EQEmulator
+
+	Copyright (C) 2001-2026 EQEmu Development Team
+
+	This program is free software; you can redistribute it and/or modify
+	it under the terms of the GNU General Public License as published by
+	the Free Software Foundation; either version 3 of the License, or
+	(at your option) any later version.
+
+	This program is distributed in the hope that it will be useful,
+	but WITHOUT ANY WARRANTY; without even the implied warranty of
+	MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+	GNU General Public License for more details.
+
+	You should have received a copy of the GNU General Public License
+	along with this program. If not, see <http://www.gnu.org/licenses/>.
+*/
 #include "corpse.h"
 
 #include "common/data_verification.h"
@@ -20,6 +37,7 @@
 #include "zone/string_ids.h"
 #include "zone/worldserver.h"
 
+#include <algorithm>
 #include <iostream>
 
 using json = nlohmann::json;
@@ -158,6 +176,7 @@ Corpse::Corpse(
 
 
 	if (npc->HasPrivateCorpse()) {
+		m_private_corpse = true;
 		m_corpse_delay_timer.SetTimer(m_corpse_decay_timer.GetRemainingTime() + 1000);
 	}
 
@@ -568,7 +587,11 @@ Corpse::Corpse(
 	item_list->clear();
 
 	// timers
-	m_corpse_decay_timer.SetTimer(RuleI(Character, CorpseDecayTime));
+	// NOTE: the decay timer is intentionally NOT reset here. LoadPlayerCorpseDecayTime()
+	// (called at the top of this constructor) computes the remaining decay time from
+	// time_of_death so the corpse keeps counting down across zone boots. Resetting it
+	// here restarted the full decay timer on every load, which prevented corpses from
+	// ever reaching decay/burial in zones that don't stay booted continuously.
 	m_corpse_rezzable_timer.SetTimer(RuleI(Character, CorpseResTime));
 	m_corpse_delay_timer.SetTimer(RuleI(NPC, CorpseUnlockTimer));
 	m_corpse_graveyard_timer.SetTimer(RuleI(Zone, GraveyardTimeMS));
@@ -893,6 +916,7 @@ void Corpse::RemoveItem(LootItem *item_data)
 		if (sitem != item_data) { continue; }
 
 		m_is_corpse_changed = true;
+		ForgetAdvancedLootItem(sitem);
 		m_item_list.erase(iter);
 
 		uint8 material = EQ::InventoryProfile::CalcMaterialFromSlot(sitem->equip_slot); // autos to unsigned char
@@ -932,6 +956,7 @@ void Corpse::RemoveItemByID(uint32 item_id, int quantity)
 			if ((removed_count + stack_size) <= quantity) {
 				removed_count += stack_size;
 				m_is_corpse_changed = true;
+				ForgetAdvancedLootItem(sitem);
 				m_item_list.erase(current_item);
 			}
 			else {
@@ -944,6 +969,7 @@ void Corpse::RemoveItemByID(uint32 item_id, int quantity)
 					}
 					else if (stack_size == amount_left) {
 						removed_count += amount_left;
+						ForgetAdvancedLootItem(sitem);
 						m_item_list.erase(current_item);
 					}
 				}
@@ -982,14 +1008,19 @@ bool Corpse::IsEmpty() const
 bool Corpse::Process()
 {
 	if (m_player_corpse_depop) {
+		EndAdvancedLoot();
 		return false;
 	}
+
+	ProcessAdvancedLoot();
 
 	if (m_check_owner_online_timer.Check() && m_is_rezzable) {
 		CheckIsOwnerOnline();
 	}
 
 	if (m_corpse_delay_timer.Check()) {
+		// looting opens to everyone: the owner's Advanced Loot reservation ends with it
+		EndAdvancedLoot();
 		for (int &allowed_looter: m_allowed_looters) {
 			allowed_looter = 0;
 		}
@@ -1033,6 +1064,7 @@ bool Corpse::Process()
 	if (m_corpse_decay_timer.Check()) {
 		/* NPC */
 		if (IsNPCCorpse()) {
+			EndAdvancedLoot();
 			m_corpse_decay_timer.Disable();
 			return false;
 		}
@@ -1123,6 +1155,28 @@ void Corpse::MakeLootRequestPackets(Client *c, const EQApplicationPacket *app)
 {
 	if (!c) {
 		return;
+	}
+
+	// while the Advanced Loot window manages this corpse, classic looting would bypass its reservations
+	// a GM who is not one of the owners may still open it classically
+	if (HasAdvancedLootItems() && (!c->GetGM() || IsAdvancedLootFor(c))) {
+		const bool recipient = IsAdvancedLootFor(c);
+		if (!recipient) {
+			SendLootReqErrorPacket(c, LootResponse::NotAtThisTime);
+			return;
+		}
+
+		if (IsAdvancedLootShared() || c->IsAdvancedLooting()) {
+			if (DistanceSquaredNoZ(c->GetPosition(), m_Position) <= 625) {
+				MarkAdvancedLootPresent(c);
+			}
+
+			SendLootReqErrorPacket(c, LootResponse::AdvancedLoot);
+			return;
+		}
+
+		// the solo owner turned Advanced Looting off: everything was theirs anyway, back to classic looting
+		EndAdvancedLoot();
 	}
 
 	// Added 12/08. Started compressing loot struct on live.
@@ -1512,7 +1566,7 @@ void Corpse::LootCorpseItem(Client *c, const EQApplicationPacket *app)
 	}
 
 	if (c && inst) {
-		if (c->CheckLoreConflict(item)) {
+		if (HasLootLoreConflict(c, inst)) {
 			c->MessageString(Chat::White, LOOT_LORE_ERROR);
 			c->QueuePacket(app);
 			SendEndLootErrorPacket(c);
@@ -1521,116 +1575,7 @@ void Corpse::LootCorpseItem(Client *c, const EQApplicationPacket *app)
 			return;
 		}
 
-		if (inst->IsAugmented()) {
-			for (int i = EQ::invaug::SOCKET_BEGIN; i <= EQ::invaug::SOCKET_END; i++) {
-				EQ::ItemInstance *itm = inst->GetAugment(i);
-				if (itm) {
-					if (c->CheckLoreConflict(itm->GetItem())) {
-						c->MessageString(Chat::White, LOOT_LORE_ERROR);
-						c->QueuePacket(app);
-						SendEndLootErrorPacket(c);
-						ResetLooter();
-						delete inst;
-						return;
-					}
-				}
-			}
-		}
-
-		auto prevent_loot = false;
-
-		if (RuleB(Zone, UseZoneController)) {
-			auto controller = entity_list.GetNPCByNPCTypeID(ZONE_CONTROLLER_NPC_ID);
-			if (controller) {
-				if (parse->HasQuestSub(ZONE_CONTROLLER_NPC_ID, EVENT_LOOT_ZONE)) {
-					const auto &export_string = fmt::format(
-						"{} {} {} {}",
-						inst->GetItem()->ID,
-						inst->GetCharges(),
-						EntityList::RemoveNumbers(corpse_name),
-						GetID()
-					);
-
-					std::vector<std::any> args = {inst, this};
-					if (parse->EventNPC(EVENT_LOOT_ZONE, controller, c, export_string, 0, &args) != 0) {
-						prevent_loot = true;
-					}
-				}
-			}
-		}
-
-		if (parse->PlayerHasQuestSub(EVENT_LOOT)) {
-			const auto &export_string = fmt::format(
-				"{} {} {} {}",
-				inst->GetItem()->ID,
-				inst->GetCharges(),
-				EntityList::RemoveNumbers(corpse_name),
-				GetID()
-			);
-
-			std::vector<std::any> args = {inst, this};
-			if (parse->EventPlayer(EVENT_LOOT, c, export_string, 0, &args) != 0) {
-				prevent_loot = true;
-			}
-		}
-
-		if (parse->ZoneHasQuestSub(EVENT_LOOT_ZONE)) {
-			const auto &export_string = fmt::format(
-				"{} {} {} {}",
-				inst->GetItem()->ID,
-				inst->GetCharges(),
-				EntityList::RemoveNumbers(corpse_name),
-				GetID()
-			);
-
-			std::vector<std::any> args = {inst, this, c};
-			if (parse->EventZone(EVENT_LOOT_ZONE, zone, export_string, 0, &args) != 0) {
-				prevent_loot = true;
-			}
-		}
-
-		if (inst && PlayerEventLogs::Instance()->IsEventEnabled(PlayerEvent::LOOT_ITEM) && !IsPlayerCorpse()) {
-			auto e = PlayerEvent::LootItemEvent{
-				.item_id      = inst->GetItem()->ID,
-				.item_name    = inst->GetItem()->Name,
-				.charges      = inst->GetCharges(),
-				.augment_1_id = inst->GetAugmentItemID(0),
-				.augment_2_id = inst->GetAugmentItemID(1),
-				.augment_3_id = inst->GetAugmentItemID(2),
-				.augment_4_id = inst->GetAugmentItemID(3),
-				.augment_5_id = inst->GetAugmentItemID(4),
-				.augment_6_id = inst->GetAugmentItemID(5),
-				.npc_id       = GetNPCTypeID(),
-				.corpse_name  = EntityList::RemoveNumbers(corpse_name)
-			};
-
-			RecordPlayerEventLogWithClient(c, PlayerEvent::LOOT_ITEM, e);
-		}
-
-		if (!IsPlayerCorpse()) {
-			// dynamic zones may prevent looting by non-members or based on lockouts
-			auto dz = zone->GetDynamicZone();
-			if (dz && !dz->CanClientLootCorpse(c, GetNPCTypeID(), GetID())) {
-				prevent_loot = true;
-				// note on live this message is only sent once on the first loot attempt of an open corpse
-				c->MessageString(Chat::Loot, LOOT_NOT_ALLOWED, inst->GetItem()->Name);
-			}
-		}
-
-		if (parse->ItemHasQuestSub(inst, EVENT_LOOT)) {
-			const auto &export_string = fmt::format(
-				"{} {} {} {}",
-				inst->GetItem()->ID,
-				inst->GetCharges(),
-				EntityList::RemoveNumbers(corpse_name),
-				GetID()
-			);
-
-			std::vector<std::any> args = {inst, this};
-			if (parse->EventItem(EVENT_LOOT, c, inst, this, export_string, 0, &args) != 0) {
-				prevent_loot = true;
-			}
-		}
+		const bool prevent_loot = LootPreventedByEvents(c, inst);
 
 		if (prevent_loot) {
 			lootitem->auto_loot = -1;
@@ -1639,117 +1584,10 @@ void Corpse::LootCorpseItem(Client *c, const EQApplicationPacket *app)
 			return;
 		}
 
-
 		// safe to ACK now
 		c->QueuePacket(app);
 
-		if (!IsPlayerCorpse() && c) {
-			c->CheckItemDiscoverability(inst->GetID());
-		}
-
-		if (zone->adv_data) {
-			auto *ad = (ServerZoneAdventureDataReply_Struct *) zone->adv_data;
-			if (ad->type == Adventure_Collect && !IsPlayerCorpse()) {
-				if (ad->data_id == inst->GetItem()->ID) {
-					zone->DoAdventureCountIncrease();
-				}
-			}
-		}
-
-		// get count for task update before it's mutated by AutoPutLootInInventory
-		int        count      = inst->IsStackable() ? inst->GetCharges() : 1;
-		//Set recast on item when looting it!
-		auto       timestamps = database.GetItemRecastTimestamps(c->CharacterID());
-		const auto *d         = inst->GetItem();
-		if (d->RecastDelay) {
-			if (d->RecastType != RECAST_TYPE_UNLINKED_ITEM) {
-				inst->SetRecastTimestamp(timestamps.count(d->RecastType) ? timestamps.at(d->RecastType) : 0);
-			}
-			else {
-				inst->SetRecastTimestamp(timestamps.count(d->ID) ? timestamps.at(d->ID) : 0);
-			}
-		}
-
-		/* First add it to the looter - this will do the bag contents too */
-		if (lootitem->auto_loot > 0) {
-			if (!c->AutoPutLootInInventory(*inst, true, true, bag_item_data)) {
-				c->PutLootInInventory(EQ::invslot::slotCursor, *inst, bag_item_data);
-			}
-		}
-		else {
-			c->PutLootInInventory(EQ::invslot::slotCursor, *inst, bag_item_data);
-		}
-
-		/* Update any tasks that have an activity to loot this item */
-		if (RuleB(TaskSystem, EnableTaskSystem) && IsNPCCorpse()) {
-			c->UpdateTasksOnLoot(this, item->ID, count);
-		}
-
-		/* Remove it from Corpse */
-		if (item_data) {
-			/* Delete needs to be before RemoveItem because its deletes the pointer for
-			* item_data/bag_item_data */
-			database.DeleteItemOffCharacterCorpse(
-				m_corpse_db_id, item_data->equip_slot,
-				item_data->item_id
-			);
-			/* Delete Item Instance */
-			RemoveItem(item_data->lootslot);
-		}
-
-		/* Remove Bag Contents */
-		if (item->IsClassBag() && (GetPlayerKillItem() != -1 || GetPlayerKillItem() != 1)) {
-			for (int i = EQ::invbag::SLOT_BEGIN; i <= EQ::invbag::SLOT_END; i++) {
-				if (bag_item_data[i]) {
-					/* Delete needs to be before RemoveItem because its deletes the pointer for
-					* item_data/bag_item_data */
-					database.DeleteItemOffCharacterCorpse(
-						m_corpse_db_id,
-						bag_item_data[i]->equip_slot,
-						bag_item_data[i]->item_id
-					);
-					/* Delete Item Instance */
-					RemoveItem(bag_item_data[i]);
-				}
-			}
-		}
-
-		if (GetPlayerKillItem() != -1) {
-			SetPlayerKillItemID(0);
-		}
-
-		/* Send message with item link to groups and such */
-		EQ::SayLinkEngine linker;
-		linker.SetLinkType(EQ::saylink::SayLinkItemInst);
-		linker.SetItemInst(inst);
-
-		linker.GenerateLink();
-
-		c->MessageString(Chat::Loot, LOOTED_MESSAGE, linker.Link().c_str());
-
-		if (!IsPlayerCorpse()) {
-			Group *g = c->GetGroup();
-			if (g != nullptr) {
-				g->GroupMessageString(
-					c, Chat::Loot,
-					OTHER_LOOTED_MESSAGE,
-					c->GetName(),
-					linker.Link().c_str()
-				);
-			}
-			else {
-				Raid *r = c->GetRaid();
-				if (r != nullptr) {
-					r->RaidMessageString(
-						c,
-						Chat::Loot,
-						OTHER_LOOTED_MESSAGE,
-						c->GetName(),
-						linker.Link().c_str()
-					);
-				}
-			}
-		}
+		GiveLootToClient(c, inst, item, item_data, bag_item_data, lootitem->auto_loot > 0);
 	}
 	else {
 		SendEndLootErrorPacket(c);
@@ -1765,6 +1603,255 @@ void Corpse::LootCorpseItem(Client *c, const EQApplicationPacket *app)
 	}
 
 	safe_delete(inst);
+}
+
+// true when the item, or one of its augments, is lore and the looter already has it
+bool Corpse::HasLootLoreConflict(Client *c, EQ::ItemInstance *inst)
+{
+	if (c->CheckLoreConflict(inst->GetItem())) {
+		return true;
+	}
+
+	if (inst->IsAugmented()) {
+		for (int i = EQ::invaug::SOCKET_BEGIN; i <= EQ::invaug::SOCKET_END; i++) {
+			EQ::ItemInstance *itm = inst->GetAugment(i);
+			if (itm && c->CheckLoreConflict(itm->GetItem())) {
+				return true;
+			}
+		}
+	}
+
+	return false;
+}
+
+// runs the loot quest events, the loot event log and the dynamic zone check; true when looting is prevented
+bool Corpse::LootPreventedByEvents(Client *c, EQ::ItemInstance *inst)
+{
+	auto prevent_loot = false;
+
+	if (RuleB(Zone, UseZoneController)) {
+		auto controller = entity_list.GetNPCByNPCTypeID(ZONE_CONTROLLER_NPC_ID);
+		if (controller) {
+			if (parse->HasQuestSub(ZONE_CONTROLLER_NPC_ID, EVENT_LOOT_ZONE)) {
+				const auto &export_string = fmt::format(
+					"{} {} {} {}",
+					inst->GetItem()->ID,
+					inst->GetCharges(),
+					EntityList::RemoveNumbers(corpse_name),
+					GetID()
+				);
+
+				std::vector<std::any> args = {inst, this};
+				if (parse->EventNPC(EVENT_LOOT_ZONE, controller, c, export_string, 0, &args) != 0) {
+					prevent_loot = true;
+				}
+			}
+		}
+	}
+
+	if (parse->PlayerHasQuestSub(EVENT_LOOT)) {
+		const auto &export_string = fmt::format(
+			"{} {} {} {}",
+			inst->GetItem()->ID,
+			inst->GetCharges(),
+			EntityList::RemoveNumbers(corpse_name),
+			GetID()
+		);
+
+		std::vector<std::any> args = {inst, this};
+		if (parse->EventPlayer(EVENT_LOOT, c, export_string, 0, &args) != 0) {
+			prevent_loot = true;
+		}
+	}
+
+	if (parse->ZoneHasQuestSub(EVENT_LOOT_ZONE)) {
+		const auto &export_string = fmt::format(
+			"{} {} {} {}",
+			inst->GetItem()->ID,
+			inst->GetCharges(),
+			EntityList::RemoveNumbers(corpse_name),
+			GetID()
+		);
+
+		std::vector<std::any> args = {inst, this, c};
+		if (parse->EventZone(EVENT_LOOT_ZONE, zone, export_string, 0, &args) != 0) {
+			prevent_loot = true;
+		}
+	}
+
+	if (inst && PlayerEventLogs::Instance()->IsEventEnabled(PlayerEvent::LOOT_ITEM) && !IsPlayerCorpse()) {
+		auto e = PlayerEvent::LootItemEvent{
+			.item_id      = inst->GetItem()->ID,
+			.item_name    = inst->GetItem()->Name,
+			.charges      = inst->GetCharges(),
+			.augment_1_id = inst->GetAugmentItemID(0),
+			.augment_2_id = inst->GetAugmentItemID(1),
+			.augment_3_id = inst->GetAugmentItemID(2),
+			.augment_4_id = inst->GetAugmentItemID(3),
+			.augment_5_id = inst->GetAugmentItemID(4),
+			.augment_6_id = inst->GetAugmentItemID(5),
+			.npc_id       = GetNPCTypeID(),
+			.corpse_name  = EntityList::RemoveNumbers(corpse_name)
+		};
+
+		RecordPlayerEventLogWithClient(c, PlayerEvent::LOOT_ITEM, e);
+	}
+
+	if (!IsPlayerCorpse()) {
+		// dynamic zones may prevent looting by non-members or based on lockouts
+		auto dz = zone->GetDynamicZone();
+		if (dz && !dz->CanClientLootCorpse(c, GetNPCTypeID(), GetID())) {
+			prevent_loot = true;
+			// note on live this message is only sent once on the first loot attempt of an open corpse
+			c->MessageString(Chat::Loot, LOOT_NOT_ALLOWED, inst->GetItem()->Name);
+		}
+	}
+
+	if (parse->ItemHasQuestSub(inst, EVENT_LOOT)) {
+		const auto &export_string = fmt::format(
+			"{} {} {} {}",
+			inst->GetItem()->ID,
+			inst->GetCharges(),
+			EntityList::RemoveNumbers(corpse_name),
+			GetID()
+		);
+
+		std::vector<std::any> args = {inst, this};
+		if (parse->EventItem(EVENT_LOOT, c, inst, this, export_string, 0, &args) != 0) {
+			prevent_loot = true;
+		}
+	}
+
+	return prevent_loot;
+}
+
+// moves an item the looter is allowed to have from the corpse into their inventory
+void Corpse::GiveLootToClient(
+	Client *c,
+	EQ::ItemInstance *inst,
+	const EQ::ItemData *item,
+	LootItem *item_data,
+	LootItem **bag_item_data,
+	bool auto_loot,
+	bool remove_by_pointer
+)
+{
+	if (!IsPlayerCorpse() && c) {
+		c->CheckItemDiscoverability(inst->GetID());
+	}
+
+	if (zone->adv_data) {
+		auto *ad = (ServerZoneAdventureDataReply_Struct *) zone->adv_data;
+		if (ad->type == Adventure_Collect && !IsPlayerCorpse()) {
+			if (ad->data_id == inst->GetItem()->ID) {
+				zone->DoAdventureCountIncrease();
+			}
+		}
+	}
+
+	// get count for task update before it's mutated by AutoPutLootInInventory
+	int        count      = inst->IsStackable() ? inst->GetCharges() : 1;
+	//Set recast on item when looting it!
+	auto       timestamps = database.GetItemRecastTimestamps(c->CharacterID());
+	const auto *d         = inst->GetItem();
+	if (d->RecastDelay) {
+		if (d->RecastType != RECAST_TYPE_UNLINKED_ITEM) {
+			inst->SetRecastTimestamp(timestamps.count(d->RecastType) ? timestamps.at(d->RecastType) : 0);
+		}
+		else {
+			inst->SetRecastTimestamp(timestamps.count(d->ID) ? timestamps.at(d->ID) : 0);
+		}
+	}
+
+	/* First add it to the looter - this will do the bag contents too */
+	if (auto_loot) {
+		if (!c->AutoPutLootInInventory(*inst, true, true, bag_item_data)) {
+			c->PutLootInInventory(EQ::invslot::slotCursor, *inst, bag_item_data);
+		}
+	}
+	else {
+		c->PutLootInInventory(EQ::invslot::slotCursor, *inst, bag_item_data);
+	}
+
+	/* Update any tasks that have an activity to loot this item */
+	if (RuleB(TaskSystem, EnableTaskSystem) && IsNPCCorpse()) {
+		c->UpdateTasksOnLoot(this, item->ID, count);
+	}
+
+	if (IsNPCCorpse()) {
+		c->AchievementEvent(Achievement::EventType::LootItem, item->ID, count);
+	}
+
+	/* Remove it from Corpse */
+	if (item_data) {
+		/* Delete needs to be before RemoveItem because its deletes the pointer for
+		* item_data/bag_item_data */
+		database.DeleteItemOffCharacterCorpse(
+			m_corpse_db_id, item_data->equip_slot,
+			item_data->item_id
+		);
+		/* Delete Item Instance */
+		if (remove_by_pointer) {
+			RemoveItem(item_data);
+		}
+		else {
+			RemoveItem(item_data->lootslot);
+		}
+	}
+
+	/* Remove Bag Contents */
+	if (item->IsClassBag() && (GetPlayerKillItem() != -1 || GetPlayerKillItem() != 1)) {
+		for (int i = EQ::invbag::SLOT_BEGIN; i <= EQ::invbag::SLOT_END; i++) {
+			if (bag_item_data[i]) {
+				/* Delete needs to be before RemoveItem because its deletes the pointer for
+				* item_data/bag_item_data */
+				database.DeleteItemOffCharacterCorpse(
+					m_corpse_db_id,
+					bag_item_data[i]->equip_slot,
+					bag_item_data[i]->item_id
+				);
+				/* Delete Item Instance */
+				RemoveItem(bag_item_data[i]);
+			}
+		}
+	}
+
+	if (GetPlayerKillItem() != -1) {
+		SetPlayerKillItemID(0);
+	}
+
+	/* Send message with item link to groups and such */
+	EQ::SayLinkEngine linker;
+	linker.SetLinkType(EQ::saylink::SayLinkItemInst);
+	linker.SetItemInst(inst);
+
+	linker.GenerateLink();
+
+	c->MessageString(Chat::Loot, LOOTED_MESSAGE, linker.Link().c_str());
+
+	if (!IsPlayerCorpse()) {
+		Group *g = c->GetGroup();
+		if (g != nullptr) {
+			g->GroupMessageString(
+				c, Chat::Loot,
+				OTHER_LOOTED_MESSAGE,
+				c->GetName(),
+				linker.Link().c_str()
+			);
+		}
+		else {
+			Raid *r = c->GetRaid();
+			if (r != nullptr) {
+				r->RaidMessageString(
+					c,
+					Chat::Loot,
+					OTHER_LOOTED_MESSAGE,
+					c->GetName(),
+					linker.Link().c_str()
+				);
+			}
+		}
+	}
 }
 
 void Corpse::EndLoot(Client *c, const EQApplicationPacket *app)
@@ -2287,7 +2374,7 @@ void Corpse::CheckIsOwnerOnline()
 	}
 }
 
-void Corpse::CastRezz(uint16 spell_id, Mob *caster)
+void Corpse::CastRezz(int32 spell_id, Mob *caster)
 {
 	LogSpells(
 		"spell_id [{}] IsRezzed() [{}], rez_experience [{}], rez_timer enabled [{}]",

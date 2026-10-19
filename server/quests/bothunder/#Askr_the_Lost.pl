@@ -8,7 +8,7 @@ sub EVENT_SPAWN {
 	$npc->SetSpecialAbility(35, 1); # Immune to harm from clients
 
 	quest::say("All to me!");
-	quest::settimer(1,1800);
+	quest::settimer(1,3600);
 }
 
 sub EVENT_TIMER  {

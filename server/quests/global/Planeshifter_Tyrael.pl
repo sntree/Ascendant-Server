@@ -108,11 +108,22 @@ sub EVENT_SAY {
 
     # ---- GENERIC FLOW (all other zones) ----
     my $has_raid = plugin::HasRaidTier($current_zone);
+    my $raid_only = (defined &plugin::IsRaidOnly && plugin::IsRaidOnly($current_zone)) ? 1 : 0;
 
     if ($text =~ /hail/i) {
         $client->Message(18, "The planes bend to my will. I can bind you to an expedition in $zone_long_name.");
 
-        if ($has_raid) {
+        if ($has_raid && $raid_only) {
+            # Raid-only zone (every boss is a raid target) — single raid option
+            $client->Message(18, " ");
+            $client->Message(18, "  " . quest::saylink("raid", 1, "[Raid Expedition]") .
+                "  Non-respawning. Full zone with raid bosses. 16h lockout.");
+            $client->Message(18, " ");
+            $client->Message(18, "  " . quest::saylink("enter", 1, "[Enter]") .
+                " your expedition or " . quest::saylink("send group", 1, "[Send Group]"));
+            $client->Message(21, "Raid expeditions only in this zone | Duration: 7d | One active expedition at a time.");
+        }
+        elsif ($has_raid) {
             # Two-tier zone — menu with both tiers
             $client->Message(18, " ");
             $client->Message(18, "  " . quest::saylink("expedition", 1, "[Normal Expedition]") .
@@ -142,7 +153,12 @@ sub EVENT_SAY {
         }
     }
     elsif ($text =~ /expedition/i) {
-        plugin::CreateExpedition("", 0, "", 1, 54, "normal");
+        if ($raid_only) {
+            $client->Message(13, "This zone only offers raid expeditions.");
+        }
+        else {
+            plugin::CreateExpedition("", 0, "", 1, 54, "normal");
+        }
     }
     elsif ($text =~ /enter/i) {
         plugin::TeleportToExpedition();

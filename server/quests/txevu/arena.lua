@@ -4,7 +4,7 @@ end
 
 function event_timer(e)
   eq.stop_timer("spawncondition");
-  eq.spawn_condition("txevu", 0, 6, 1);
+  eq.spawn_condition("txevu", eq.get_zone_instance_id(), 6, 1);
 	--set arena trash spawn condition to on
 	eq.depop(297034); -- depop Champion if he is still up
 end

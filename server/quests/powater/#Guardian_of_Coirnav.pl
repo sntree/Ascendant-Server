@@ -20,5 +20,11 @@ sub EVENT_DEATH_COMPLETE {
 
 sub EVENT_TIMER {
   quest::stoptimer(1);
-  quest::depop_withtimer();
+  # Re-verify the lockout right before depopping. #coirnav_controller clears a
+  # stale lockout at fresh-instance boot; re-checking here avoids a boot-order
+  # race where the Guardian read the stale value before the controller cleared it.
+  my $done_key = $instanceid ? "${instanceid}_coirnav_done" : "coirnav_done";
+  if(defined $qglobals{$done_key} && $qglobals{$done_key} == 3) {
+    quest::depop_withtimer();
+  }
 }

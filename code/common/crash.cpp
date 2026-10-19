@@ -1,3 +1,20 @@
+/*	EQEmu: EQEmulator
+
+	Copyright (C) 2001-2026 EQEmu Development Team
+
+	This program is free software; you can redistribute it and/or modify
+	it under the terms of the GNU General Public License as published by
+	the Free Software Foundation; either version 3 of the License, or
+	(at your option) any later version.
+
+	This program is distributed in the hope that it will be useful,
+	but WITHOUT ANY WARRANTY; without even the implied warranty of
+	MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+	GNU General Public License for more details.
+
+	You should have received a copy of the GNU General Public License
+	along with this program. If not, see <http://www.gnu.org/licenses/>.
+*/
 #include "crash.h"
 
 #include "common/eqemu_config.h"
@@ -226,13 +243,26 @@ void set_exception_handler() {
 #include <unistd.h>
 #include <sys/fcntl.h>
 
-#ifdef __FreeBSD__
 #include <signal.h>
+#ifdef __FreeBSD__
 #include <sys/stat.h>
 #endif
 
+static volatile sig_atomic_t crash_in_progress = 0;
+
 void print_trace()
 {
+	// The dump below is not async-signal-safe (popen, malloc, logging). If the crash came from heap
+	// corruption inside malloc, it can deadlock on the allocator lock and the process never exits, holding
+	// its launcher slot. So: a second fault while dumping exits at once, and an alarm kills the process
+	// if the dump has not finished in time.
+	if (crash_in_progress) {
+		_exit(1);
+	}
+	crash_in_progress = 1;
+	signal(SIGALRM, SIG_DFL);
+	alarm(60);
+
 	bool does_gdb_exist = Strings::Contains(Process::execute("gdb -v"), "GNU");
 	if (!does_gdb_exist) {
 		LogCrash(

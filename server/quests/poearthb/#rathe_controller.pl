@@ -5,6 +5,11 @@ sub _rathe_key {
 
 sub EVENT_SPAWN { 
    quest::spawn_condition($zonesn,1,0); #Make sure we aren't up yet.
+ # Fresh DZ boot: clear any stale Rathe lockout inherited from a PREVIOUS expedition
+ # that reused this instance id. Otherwise a recycled id makes the controller wait
+ # for the (up to 5 day) global to expire before popping the Rathe Council. The real
+ # cross-session lockout is the expedition replay timer, not this qglobal.
+ quest::delglobal(_rathe_key()) if $instanceid;
  my $rathe_key = _rathe_key();
  if (defined $qglobals{$rathe_key}){
    quest::settimer("rathe",1); #waiting for the global to expire to pop rathe

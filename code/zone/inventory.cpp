@@ -1,21 +1,20 @@
-/*	EQEMu: Everquest Server Emulator
-	Copyright (C) 2001-2016 EQEMu Development Team (http://eqemulator.net)
+/*	EQEmu: EQEmulator
+
+	Copyright (C) 2001-2026 EQEmu Development Team
 
 	This program is free software; you can redistribute it and/or modify
 	it under the terms of the GNU General Public License as published by
-	the Free Software Foundation; version 2 of the License.
+	the Free Software Foundation; either version 3 of the License, or
+	(at your option) any later version.
 
 	This program is distributed in the hope that it will be useful,
-	but WITHOUT ANY WARRANTY except by those people which sell it, which
-	are required to give you total support for your newly bought product;
-	without even the implied warranty of MERCHANTABILITY or FITNESS FOR
-	A PARTICULAR PURPOSE. See the GNU General Public License for more details.
+	but WITHOUT ANY WARRANTY; without even the implied warranty of
+	MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+	GNU General Public License for more details.
 
 	You should have received a copy of the GNU General Public License
-	along with this program; if not, write to the Free Software
-	Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
+	along with this program. If not, see <http://www.gnu.org/licenses/>.
 */
-
 #include "client.h"
 
 #include "common/eqemu_logsys.h"
@@ -937,6 +936,11 @@ void Client::SendCursorBuffer()
 	auto test_item = test_inst->GetItem();
 	if (test_item == nullptr) { return; }
 
+	// TOB+: the new cursor item leaves the Item Overflow window
+	if (IsItemOverflowEnabled()) {
+		SendItemOverflowAction(ItemOverflowRemoved, static_cast<uint32>(test_inst->GetSerialNumber()));
+	}
+
 	bool lore_pass = true;
 	if (test_item->LoreGroup == -1) {
 		lore_pass = (m_inv.HasItem(test_item->ID, 0, ~(invWhereSharedBank | invWhereCursor)) == INVALID_INDEX);
@@ -967,6 +971,112 @@ void Client::SendCursorBuffer()
 	}
 }
 
+bool Client::IsItemOverflowEnabled()
+{
+	return ClientVersion() >= EQ::versions::ClientVersion::TOB && RuleB(Character, EnableItemOverflow);
+}
+
+void Client::SendItemOverflowAction(uint32 action, uint64 item_index)
+{
+	if (ClientVersion() < EQ::versions::ClientVersion::TOB) {
+		return;
+	}
+
+	auto outapp = new EQApplicationPacket(OP_ItemOverflow, sizeof(ItemOverflow_Struct));
+	auto o      = reinterpret_cast<ItemOverflow_Struct *>(outapp->pBuffer);
+
+	o->action     = action;
+	o->item_index = item_index;
+
+	QueuePacket(outapp);
+	safe_delete(outapp);
+}
+
+// Item Overflow (TOB+) is the cursor queue behind the cursor item itself
+void Client::SendItemOverflowList()
+{
+	if (!IsItemOverflowEnabled()) {
+		return;
+	}
+
+	// the client appends every overflow item packet to its list, so start from an empty one
+	SendItemOverflowAction(ItemOverflowClear);
+
+	int position = 0;
+	for (auto it = m_inv.cursor_cbegin(); it != m_inv.cursor_cend(); ++it, ++position) {
+		if (it == m_inv.cursor_cbegin() || !*it) {
+			continue;
+		}
+
+		if (position > EQ::invslot::OVERFLOW_END - EQ::invslot::OVERFLOW_BEGIN) {
+			break;
+		}
+
+		SendItemPacket(EQ::invslot::OVERFLOW_BEGIN + position, *it, ItemPacketOverflow);
+	}
+}
+
+bool Client::RetrieveOverflowItem(uint64 item_index)
+{
+	EQ::ItemInstance *inst = nullptr;
+	for (auto it = m_inv.cursor_cbegin(); it != m_inv.cursor_cend(); ++it) {
+		if (it != m_inv.cursor_cbegin() && *it && static_cast<uint32>((*it)->GetSerialNumber()) == item_index) {
+			inst = *it;
+			break;
+		}
+	}
+
+	if (!inst || !inst->GetItem()) {
+		// the client has a row we do not, drop it
+		SendItemOverflowAction(ItemOverflowRemoved, item_index);
+		return false;
+	}
+
+	const auto item = inst->GetItem();
+
+	// the queued copy itself counts as on the cursor, so leave the cursor out of the lore check
+	bool lore_conflict = false;
+	if (item->LoreFlag && item->LoreGroup == -1) {
+		lore_conflict = m_inv.HasItem(item->ID, 0, ~(invWhereSharedBank | invWhereCursor)) != INVALID_INDEX;
+	} else if (item->LoreFlag && item->LoreGroup != 0) {
+		lore_conflict = m_inv.HasItemByLoreGroup(item->LoreGroup, ~(invWhereSharedBank | invWhereCursor)) != INVALID_INDEX;
+	}
+
+	if (lore_conflict) {
+		MessageString(Chat::Red, DUP_LORE);
+		return false;
+	}
+
+	const int16 free_slot = m_inv.FindFreeSlot(
+		inst->IsClassBag(),
+		false,
+		item->Size,
+		item->ItemType == EQ::item::ItemTypeArrow
+	);
+	if (free_slot == INVALID_INDEX) {
+		MessageString(Chat::Red, TRANSACTION_INVENTORY_FULL);
+		return false;
+	}
+
+	inst = m_inv.PopCursorQueueItem(inst);
+	if (!inst) {
+		return false;
+	}
+
+	auto s = m_inv.cursor_cbegin(), e = m_inv.cursor_cend();
+	database.SaveCursor(CharacterID(), s, e);
+
+	const std::string item_name = item->Name;
+	const int16       count     = inst->IsStackable() ? std::max<int16>(inst->GetCharges(), 1) : 1;
+
+	PutItemInInventory(free_slot, *inst, true);
+	safe_delete(inst);
+
+	SendItemOverflowAction(ItemOverflowRemoved, item_index);
+	MessageString(Chat::Yellow, ITEM_OVERFLOW_RETRIEVED, item_name.c_str(), std::to_string(count).c_str());
+	return true;
+}
+
 // Remove item from inventory
 void Client::DeleteItemInInventory(int16 slot_id, int16 quantity, bool client_update, bool update_db) {
 	#if (EQDEBUG >= 5)
@@ -977,7 +1087,7 @@ void Client::DeleteItemInInventory(int16 slot_id, int16 quantity, bool client_up
 	// - cursor queue slots were slipping through and crashing client
 	if(!m_inv[slot_id]) {
 		// Make sure the client deletes anything in this slot to match the server.
-		if(client_update && IsValidSlot(slot_id)) {
+		if(client_update && (IsValidSlot(slot_id) || EQ::invslot::IsKeyRingSlot(slot_id))) {
 			EQApplicationPacket* outapp;
 			outapp = new EQApplicationPacket(OP_DeleteItem, sizeof(DeleteItem_Struct));
 			DeleteItem_Struct* delitem	= (DeleteItem_Struct*)outapp->pBuffer;
@@ -1009,7 +1119,7 @@ void Client::DeleteItemInInventory(int16 slot_id, int16 quantity, bool client_up
 			database.SaveInventory(character_id, inst, slot_id);
 	}
 
-	if(client_update && IsValidSlot(slot_id)) {
+	if(client_update && (IsValidSlot(slot_id) || EQ::invslot::IsKeyRingSlot(slot_id))) {
 		EQApplicationPacket* outapp = nullptr;
 		if(inst) {
 			if (!inst->IsStackable() && !isDeleted) {
@@ -1049,6 +1159,7 @@ bool Client::PushItemOnCursor(const EQ::ItemInstance& inst, bool client_update)
 
 	EvolvingItemsManager::Instance()->DoLootChecks(CharacterID(), EQ::invslot::slotCursor, inst);
 	m_inv.PushCursor(inst);
+	AchievementEvent(Achievement::EventType::OwnItem, inst.GetID(), 1);
 
 	if (client_update) {
 		SendItemPacket(EQ::invslot::slotCursor, &inst, ItemPacketLimbo);
@@ -1071,6 +1182,7 @@ bool Client::PutItemInInventory(int16 slot_id, const EQ::ItemInstance& inst, boo
 
 	EvolvingItemsManager::Instance()->DoLootChecks(CharacterID(), slot_id, inst);
 	m_inv.PutItem(slot_id, inst);
+	AchievementEvent(Achievement::EventType::OwnItem, inst.GetID(), 1);
 
 	if (client_update)
 	{
@@ -1108,6 +1220,8 @@ void Client::PutLootInInventory(int16 slot_id, const EQ::ItemInstance &inst, Loo
 		m_inv.PutItem(slot_id, inst);
 		database.SaveInventory(CharacterID(), &inst, slot_id);
 	}
+
+	AchievementEvent(Achievement::EventType::OwnItem, inst.GetID(), 1);
 
 	// Subordinate items in cursor buffer must be sent via ItemPacketSummonItem or we just overwrite the visible cursor and desync the client
 	if (slot_id == EQ::invslot::slotCursor && !cursor_empty) {
@@ -1610,6 +1724,11 @@ bool Client::IsBankSlot(uint32 slot)
 // Moves items around both internally and in the database
 // In the future, this can be optimized by pushing all changes through one database REPLACE call
 bool Client::SwapItem(MoveItem_Struct* move_in) {
+
+	// TOB+ key rings are not inventory slots
+	if (EQ::invslot::IsKeyRingRange(move_in->from_slot) || EQ::invslot::IsKeyRingRange(move_in->to_slot)) {
+		return MoveKeyRingItem(move_in);
+	}
 
 	uint32 src_slot_check = move_in->from_slot;
 	uint32 dst_slot_check = move_in->to_slot;
@@ -2995,6 +3114,28 @@ void Client::SendItemPacket(int16 slot_id, const EQ::ItemInstance* inst, ItemPac
 		return;
 	}
 
+	// TOB+: an item queued behind the cursor shows up in the Item Overflow window instead
+	if (
+		packet_type == ItemPacketLimbo &&
+		slot_id == EQ::invslot::slotCursor &&
+		m_inv.CursorSize() > 1 &&
+		IsItemOverflowEnabled()
+	) {
+		const auto head = m_inv.GetCursorItem();
+		if (head && head != inst && head->GetSerialNumber() != inst->GetSerialNumber()) {
+			const int position = std::min(
+				m_inv.CursorSize() - 1,
+				static_cast<int>(EQ::invslot::OVERFLOW_END - EQ::invslot::OVERFLOW_BEGIN)
+			);
+
+			SendItemPacket(EQ::invslot::OVERFLOW_BEGIN + position, inst, ItemPacketOverflow);
+			if (inst->GetItem()) {
+				MessageString(Chat::Yellow, ITEM_OVERFLOW_ADDED, inst->GetItem()->Name);
+			}
+			return;
+		}
+	}
+
 	if (packet_type != ItemPacketMerchant) {
 		if (slot_id <= EQ::invslot::POSSESSIONS_END && slot_id >= EQ::invslot::POSSESSIONS_BEGIN) {
 			if ((((uint64)1 << slot_id) & GetInv().GetLookup()->PossessionsBitmask) == 0) {
@@ -3190,7 +3331,7 @@ void Client::SetBandolier(const EQApplicationPacket *app)
 						LogInventory("returning item [{}] in weapon slot [{}] to inventory",
 						InvItem->GetItem()->Name, WeaponSlot);
 						LogInventory("returning item [{}] in weapon slot [{}] to inventory", InvItem->GetItem()->Name, WeaponSlot);
-						if (MoveItemToInventory(InvItem)) {
+						if (MoveItemToInventory(InvItem, true)) {
 							database.SaveInventory(character_id, 0, WeaponSlot);
 							LogError("returning item [{}] in weapon slot [{}] to inventory", InvItem->GetItem()->Name, WeaponSlot);
 						}
@@ -3228,7 +3369,7 @@ void Client::SetBandolier(const EQApplicationPacket *app)
 
 				if(InvItem) {
 					// If there was already an item in that weapon slot that we replaced, find a place to put it
-					if (!MoveItemToInventory(InvItem)) {
+					if (!MoveItemToInventory(InvItem, true)) {
 						LogError("Char: [{}], ERROR returning [{}] to inventory", GetName(), InvItem->GetItem()->Name);
 					}
 					safe_delete(InvItem);
@@ -3242,7 +3383,7 @@ void Client::SetBandolier(const EQApplicationPacket *app)
 			if(InvItem) {
 				LogInventory("Bandolier has no item for slot [{}], returning item [{}] to inventory", WeaponSlot, InvItem->GetItem()->Name);
 				// If there was an item in that weapon slot, put it in the inventory
-				if (MoveItemToInventory(InvItem)) {
+				if (MoveItemToInventory(InvItem, true)) {
 					database.SaveInventory(character_id, 0, WeaponSlot);
 				}
 				else {
@@ -3255,6 +3396,29 @@ void Client::SetBandolier(const EQApplicationPacket *app)
 
 	if (RuleI(Character, BandolierSwapDelay) > 0) {
 		bandolier_throttle_timer.Start(RuleI(Character, BandolierSwapDelay));
+	}
+
+	// Re-sync the four weapon slots with the client to guarantee the client's view matches
+	// the server's after the swap. The client performs its own item shuffling when activating
+	// a bandolier set; if it diverges from the server (e.g. a two-hander forces the off-hand
+	// empty, or a full inventory pushes the displaced item to the cursor) the stale client
+	// state can be turned into a duplicate via the OP_MoveItem resync path. Re-sending the
+	// authoritative slot contents here is a no-op in the normal case and corrective otherwise.
+	for (int BandolierSlot = bandolierPrimary; BandolierSlot <= bandolierAmmo; BandolierSlot++) {
+		int16 sync_slot = BandolierSlotToWeaponSlot(BandolierSlot);
+		const EQ::ItemInstance *sync_inst = m_inv[sync_slot];
+		if (sync_inst) {
+			SendItemPacket(sync_slot, sync_inst, ItemPacketTrade);
+		}
+		else {
+			auto outapp = new EQApplicationPacket(OP_DeleteItem, sizeof(DeleteItem_Struct));
+			DeleteItem_Struct *delete_slot = (DeleteItem_Struct*)outapp->pBuffer;
+			delete_slot->from_slot       = sync_slot;
+			delete_slot->to_slot         = 0xFFFFFFFF;
+			delete_slot->number_in_stack = 0xFFFFFFFF;
+			QueuePacket(outapp);
+			safe_delete(outapp);
+		}
 	}
 
 	// finally, recalculate any stat bonuses from the item change

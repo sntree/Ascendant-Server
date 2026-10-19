@@ -11,6 +11,15 @@
 # Update this when a new expansion unlocks on the server.
 # Expansion numbers: 0-9=Classic, 10-11=Kunark, 12-14=Velious, 15=Luclin, 16=PoP, 17+=GoD+
 my $CURRENT_MAX_EXPANSION = 16;  # Currently: PoP
+# Owner AA schedule (2026-09-26): PoP -> 16 (UF); GoD -> 17 (House of Thule); each later unlock +1.
+# Evaluated at call time so the GoD release (rule 6 -> 7) unlocks HoT AAs with no edit here.
+# NOTE: HoT ranks (aa_ranks.expansion 17) need level_req <= 65 to be shown/bought (see lines ~340/584);
+#       server/sql/2026_09_26_god_gate_release.sql lowers them at release.
+sub _insight_max_expansion {
+    my $max = $CURRENT_MAX_EXPANSION;
+    $max = 17 if defined &quest::is_gates_of_discord_enabled && quest::is_gates_of_discord_enabled();
+    return $max;
+}
 
 # ── Economy constants ──
 # Each tome gives 1 credit of its tier; each AA rank costs 1 credit of its tier
@@ -283,7 +292,7 @@ sub ShowTrainingMenu {
 
     # Also filter to current expansion only
     push @where, "ur.expansion <= ?";
-    push @params, $CURRENT_MAX_EXPANSION;
+    push @params, _insight_max_expansion();
 
     $where_clause = "WHERE " . join(" AND ", @where);
 
@@ -323,7 +332,7 @@ sub ShowTrainingMenu {
     my $player_class = $client->GetClass();
     my $player_bitmask = 1 << ($player_class - 1);
 
-    # Only hide AAs where the next rank requires level > 60.
+    # Only hide AAs where the next rank requires level > 65 (server max level).
     # Maxed AAs and prereq-blocked AAs always remain visible.
     @all_aas = grep {
         my $frid = _has_native_access($_, $player_bitmask)
@@ -337,7 +346,7 @@ sub ShowTrainingMenu {
             my ($req) = $dbh->selectrow_array(
                 "SELECT level_req FROM aa_ranks WHERE id = ?", undef, $next_rank_id
             );
-            !$req || $req == 0 || $req <= 60;  # hide only if level_req > 60
+            !$req || $req == 0 || $req <= 65;  # hide only if level_req > 65
         }
     } @all_aas;
 
@@ -1029,8 +1038,11 @@ sub _count_ranks {
 
     while ($current && $current > 0 && $safety < 100) {
         $count++;
+        # Only follow next_id when that rank row exists: many PEQ chains point past the last
+        # rank in this database (e.g. Gelid Rending rank 2), which made the trainer offer a
+        # rank the server cannot grant.
         my ($next) = $dbh->selectrow_array(
-            "SELECT next_id FROM aa_ranks WHERE id = ?", undef, $current
+            "SELECT n.id FROM aa_ranks r JOIN aa_ranks n ON n.id = r.next_id WHERE r.id = ?", undef, $current
         );
         last unless $next && $next > 0;
         $current = $next;
@@ -1048,8 +1060,9 @@ sub _get_nth_rank_id {
 
     my $current = $first_rank_id;
     for (my $i = 0; $i < $n; $i++) {
+        # Missing next rank row = chain ends here (see _count_ranks)
         my ($next) = $dbh->selectrow_array(
-            "SELECT next_id FROM aa_ranks WHERE id = ?", undef, $current
+            "SELECT n.id FROM aa_ranks r JOIN aa_ranks n ON n.id = r.next_id WHERE r.id = ?", undef, $current
         );
         return undef unless $next && $next > 0;
         $current = $next;
