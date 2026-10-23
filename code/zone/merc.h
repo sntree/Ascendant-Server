@@ -19,6 +19,8 @@
 
 #include "zone/npc.h"
 
+#include <array>
+
 class Client;
 class Corpse;
 class Group;
@@ -34,6 +36,14 @@ namespace EQ
 }
 
 constexpr int MAXMERCS = 11;
+constexpr const char* MercAutoAssistBucket = "merc_auto_assist";
+constexpr const char* MercAnnounceBucket = "merc_announce";
+constexpr const char* MercAreaNukesBucket = "merc_ae";
+constexpr const char* MercFollowBucket = "merc_follow";
+constexpr const char* MercHealOffsetBucket = "merc_heal";
+constexpr uint8 MercFollowDistanceMin = 10;
+constexpr uint8 MercFollowDistanceMax = 60;
+constexpr uint8 MercHealOffsetMax = 20;
 #define TANK 1
 #define HEALER 2
 #define MELEEDPS 9
@@ -55,6 +65,28 @@ struct MercSpell {
 	uint32 time_cancast; // when we can cast this spell next
 };
 
+// Short merc chat lines; each kind repeats at most every few seconds so a long fight does not flood the chat window
+enum class MercChatter : uint8 {
+	Engage,
+	Assist,
+	Hold,
+	Leash,
+	LowMana,
+	SkippedMez,
+	Resurrect,
+	Heal,
+	Count
+};
+
+// Per-character choices made with $merc, kept in data buckets and loaded at zone-in
+struct MercOwnerSettings {
+	bool announce = true;
+	bool area_nukes = true;
+	bool hold = false; // not saved: $merc hold lasts until $merc back or the next zone-in
+	uint8 follow_distance = 0; // 0 = the default distance
+	uint8 heal_offset = 0; // percent added to the HP at which a healer heals the owner
+};
+
 struct MercTimer {
 	uint16 timerid; // EndurTimerIndex
 	uint8 timertype; // 1 = spell, 2 = disc
@@ -68,34 +100,34 @@ public:
 	virtual ~Merc();
 
 	//abstract virtual function implementations requird by base abstract class
-	virtual bool Death(Mob* killer_mob, int64 damage, int32 spell_id, EQ::skills::SkillType attack_skill, uint8 killed_by = 0, bool is_buff_tic = false);
-	virtual void Damage(Mob* from, int64 damage, int32 spell_id, EQ::skills::SkillType attack_skill, bool avoidable = true, int8 buffslot = -1, bool iBuffTic = false, eSpecialAttacks special = eSpecialAttacks::None);
-	virtual bool Attack(Mob* other, int Hand = EQ::invslot::slotPrimary, bool FromRiposte = false, bool IsStrikethrough = false,
-	bool IsFromSpell = false, ExtraAttackOptions *opts = nullptr);
-	virtual bool HasRaid() { return false; }
-	virtual bool HasGroup() { return (GetGroup() ? true : false); }
-	virtual Raid* GetRaid() { return 0; }
-	virtual Group* GetGroup() { return entity_list.GetGroupByMob(this); }
+	bool Death(Mob* killer_mob, int64 damage, int32 spell_id, EQ::skills::SkillType attack_skill, KilledByTypes killed_by = KilledByTypes::Killed_NPC, bool is_buff_tic = false) override;
+	void Damage(Mob* from, int64 damage, int32 spell_id, EQ::skills::SkillType attack_skill, bool avoidable = true, int8 buffslot = -1, bool iBuffTic = false, eSpecialAttacks special = eSpecialAttacks::None) override;
+	bool Attack(Mob* other, int Hand = EQ::invslot::slotPrimary, bool FromRiposte = false, bool IsStrikethrough = false,
+	bool IsFromSpell = false, ExtraAttackOptions *opts = nullptr) override;
+	bool HasRaid() override { return false; }
+	bool HasGroup() override { return (GetGroup() ? true : false); }
+	Raid* GetRaid() override { return 0; }
+	Group* GetGroup() override { return entity_list.GetGroupByMob(this); }
 
 	// Mob AI Virtual Override Methods
 	virtual void AI_Start(int32 iMoveDelay = 0);
-	virtual void AI_Stop();
-	virtual void AI_Process();
+	void AI_Stop() override;
+	void AI_Process() override;
 
 	//virtual bool AICastSpell(Mob* tar, int8 iChance, uint32 iSpellTypes);
 	virtual bool AICastSpell(int8 iChance, uint32 iSpellTypes);
-	virtual bool AIDoSpellCast(int32 spellid, Mob* tar, int32 mana_cost, uint32* oDontDoAgainBefore = 0);
-	virtual bool AI_EngagedCastCheck();
+	bool AIDoSpellCast(int32 spellid, Mob* tar, int32 mana_cost, uint32* oDontDoAgainBefore = 0) override;
+	bool AI_EngagedCastCheck() override;
 	//virtual bool AI_PursueCastCheck();
-	virtual bool AI_IdleCastCheck();
+	bool AI_IdleCastCheck() override;
 
-	virtual bool Process();
+	bool Process() override;
 
 	// Static Merc Group Methods
 	static bool AddMercToGroup(Merc* merc, Group* group);
 	static bool RemoveMercFromGroup(Merc* merc, Group* group);
 	void ProcessClientZoneChange(Client* mercOwner);
-	static void MercGroupSay(Mob *speaker, const char *msg, ...);
+	void MercSay(MercChatter kind, const std::string& message, bool to_group = false);
 	Corpse* GetGroupMemberCorpse();
 
 	// Merc Spell Casting Methods
@@ -104,7 +136,7 @@ public:
 	void SetDisciplineRecastTimer(uint16 timer_id, int32 spellid, uint32 recast_delay);
 	void SetSpellTimeCanCast(int32 spellid, uint32 recast_delay);
 	static int32 GetSpellRecastTimer(Merc *caster, uint16 timer_id);
-	static bool CheckSpellRecastTimers(Merc *caster, int32 spellid);
+	static bool CheckSpellRecastTimers(Merc *caster, const MercSpell& merc_spell);
 	static int32 GetDisciplineRecastTimer(Merc *caster, uint16 timer_id);
 	static bool CheckDisciplineRecastTimers(Merc *caster, int32 spell_id, uint16 timer_id);
 	static int32 GetDisciplineRemainingTime(Merc *caster, uint16 timer_id);
@@ -125,6 +157,7 @@ public:
 	static MercSpell GetBestMercSpellForAETaunt(Merc* caster);
 	static MercSpell GetBestMercSpellForTaunt(Merc* caster);
 	static MercSpell GetBestMercSpellForHate(Merc* caster);
+	static MercSpell GetBestMercSpellForDelayedHeal(Merc* caster);
 	static MercSpell GetBestMercSpellForCure(Merc* caster, Mob* target);
 	static MercSpell GetBestMercSpellForStun(Merc* caster);
 	static MercSpell GetBestMercSpellForAENuke(Merc* caster, Mob* target);
@@ -136,26 +169,43 @@ public:
 	static bool CheckAENuke(Merc* caster, Mob* tar, int32 spell_id, uint8 &numTargets);
 	static bool GetNeedsCured(Mob *tar);
 	bool HasOrMayGetAggro();
+	bool ShouldHoldForHate();
+	bool IsHoldingBackOffense();
+	bool IsPassiveHealer();
+	bool EngagesOnOwnerAttack();
+	bool IsAssistStance();
+	bool ShouldEngageOwnerTarget(Mob* owner);
+	Mob* GetCalledTarget();
+	const MercOwnerSettings& GetOwnerSettings();
+	float GetFollowDistance();
+	void CallAssist(Mob* target);
+	bool CanRestNearOwner();
+	bool IsTargetedByHostile();
+	bool StepBackFromTarget();
+	void PickTarget();
+	static uint8 GetDefaultStance(uint32 merc_template_id);
 	bool UseDiscipline(int32 spell_id, int32 target);
 
 	bool IsMerc() const override { return true; }
 	bool IsOfClientBotMerc() const override { return true; }
 
-	virtual void FillSpawnStruct(NewSpawn_Struct* ns, Mob* ForWho);
+	void FillSpawnStruct(NewSpawn_Struct* ns, Mob* ForWho) override;
 	static Merc* LoadMercenary(Client *c, MercTemplate* merc_template, uint32 merchant_id, bool updateFromDB = false);
 	void UpdateMercInfo(Client *c);
 	void UpdateMercStats(Client *c, bool setmax = false);
 	void UpdateMercAppearance();
-	virtual void UpdateEquipmentLight();
+	void UpdateEquipmentLight() override;
 	void AddItem(uint8 slot, uint32 item_id);
 	static const char *GetRandomName();
 	bool Spawn(Client *owner);
+	void SendOwnerLinkToZone(bool spawned);
+	void SendStatTable(bool full);
 	bool Suspend();
 	bool Unsuspend(bool setMaxStats);
 	bool MercJoinClientGroup();
 	void Zone();
-	virtual void Depop();
-	virtual bool Save();
+	void Depop(bool start_spawn_timer = false) override;
+	bool Save() override;
 	bool GetDepop() { return p_depop; }
 
 	bool IsDead() { return GetHP() < 0;};
@@ -169,9 +219,9 @@ public:
 	static uint32 CalcUpkeepCost( uint32 templateID , uint8 level, uint8 currency_type = 0);
 
 	// "GET" Class Methods
-	virtual Mob* GetOwner();
+	Mob* GetOwner() override;
 	Client* GetMercenaryOwner();
-	virtual Mob* GetOwnerOrSelf();
+	Mob* GetOwnerOrSelf() override;
 	uint32 GetMercenaryID() { return _MercID; }
 	uint32 GetMercenaryCharacterID( ) { return owner_char_id; }
 	uint32 GetMercenaryTemplateID() { return _MercTemplateID; }
@@ -186,12 +236,12 @@ public:
 
 	inline const uint8 GetClientVersion() const { return _OwnerClientVersion; }
 
-	virtual void SetTarget(Mob* mob);
+	void SetTarget(Mob* mob) override;
 	bool HasSkill(EQ::skills::SkillType skill_id) const;
 	bool CanHaveSkill(EQ::skills::SkillType skill_id) const;
 	uint16 MaxSkill(EQ::skills::SkillType skillid, uint16 class_, uint16 level) const;
 	inline uint16 MaxSkill(EQ::skills::SkillType skillid) const { return MaxSkill(skillid, GetClass(), GetLevel()); }
-	virtual void DoClassAttacks(Mob *target);
+	void DoClassAttacks(Mob *target) override;
 	void CheckHateList();
 	bool CheckTaunt();
 	bool CheckAETaunt();
@@ -200,39 +250,41 @@ public:
 
 	// stat functions
 	virtual void ScaleStats(int scalepercent, bool setmax = false);
-	virtual void CalcBonuses();
+	void CalcBonuses() override;
+	void AddMercEquipmentBonuses(StatBonuses *b);
+	void RecalculateEquipmentBonuses();
 	int64 GetEndurance() const {return cur_end;} //This gets our current endurance
 	inline uint8 GetEndurancePercent() { return (uint8)((float)cur_end / (float)max_end * 100.0f); }
-	inline virtual int32 GetATK() const { return ATK; }
-	inline virtual int32 GetATKBonus() const { return itembonuses.ATK + spellbonuses.ATK; }
+	inline int32 GetATK() const override { return ATK; }
+	inline int32 GetATKBonus() const override { return itembonuses.ATK + spellbonuses.ATK; }
 	int32 GetRawACNoShield(int &shield_ac) const;
 
-	inline virtual int32 GetSTR() const { return STR; }
-	inline virtual int32 GetSTA() const { return STA; }
-	inline virtual int32 GetDEX() const { return DEX; }
-	inline virtual int32 GetAGI() const { return AGI; }
-	inline virtual int32 GetINT() const { return INT; }
-	inline virtual int32 GetWIS() const { return WIS; }
-	inline virtual int32 GetCHA() const { return CHA; }
-	inline virtual int32 GetMR() const { return MR; }
-	inline virtual int32 GetFR() const { return FR; }
-	inline virtual int32 GetDR() const { return DR; }
-	inline virtual int32 GetPR() const { return PR; }
-	inline virtual int32 GetCR() const { return CR; }
-	inline virtual int32 GetCorrup() const { return Corrup; }
+	inline int32 GetSTR() const override { return STR; }
+	inline int32 GetSTA() const override { return STA; }
+	inline int32 GetDEX() const override { return DEX; }
+	inline int32 GetAGI() const override { return AGI; }
+	inline int32 GetINT() const override { return INT; }
+	inline int32 GetWIS() const override { return WIS; }
+	inline int32 GetCHA() const override { return CHA; }
+	inline int32 GetMR() const override { return MR; }
+	inline int32 GetFR() const override { return FR; }
+	inline int32 GetDR() const override { return DR; }
+	inline int32 GetPR() const override { return PR; }
+	inline int32 GetCR() const override { return CR; }
+	inline int32 GetCorrup() const override { return Corrup; }
 
-	inline virtual int32 GetHeroicSTR() const { return itembonuses.HeroicSTR; }
-	inline virtual int32 GetHeroicSTA() const { return itembonuses.HeroicSTA; }
-	inline virtual int32 GetHeroicDEX() const { return itembonuses.HeroicDEX; }
-	inline virtual int32 GetHeroicAGI() const { return itembonuses.HeroicAGI; }
-	inline virtual int32 GetHeroicINT() const { return itembonuses.HeroicINT; }
-	inline virtual int32 GetHeroicWIS() const { return itembonuses.HeroicWIS; }
-	inline virtual int32 GetHeroicCHA() const { return itembonuses.HeroicCHA; }
-	inline virtual int32 GetHeroicMR() const { return itembonuses.HeroicMR; }
-	inline virtual int32 GetHeroicFR() const { return itembonuses.HeroicFR; }
-	inline virtual int32 GetHeroicDR() const { return itembonuses.HeroicDR; }
-	inline virtual int32 GetHeroicPR() const { return itembonuses.HeroicPR; }
-	inline virtual int32 GetHeroicCR() const { return itembonuses.HeroicCR; }
+	inline int32 GetHeroicSTR() const override { return itembonuses.HeroicSTR; }
+	inline int32 GetHeroicSTA() const override { return itembonuses.HeroicSTA; }
+	inline int32 GetHeroicDEX() const override { return itembonuses.HeroicDEX; }
+	inline int32 GetHeroicAGI() const override { return itembonuses.HeroicAGI; }
+	inline int32 GetHeroicINT() const override { return itembonuses.HeroicINT; }
+	inline int32 GetHeroicWIS() const override { return itembonuses.HeroicWIS; }
+	inline int32 GetHeroicCHA() const override { return itembonuses.HeroicCHA; }
+	inline int32 GetHeroicMR() const override { return itembonuses.HeroicMR; }
+	inline int32 GetHeroicFR() const override { return itembonuses.HeroicFR; }
+	inline int32 GetHeroicDR() const override { return itembonuses.HeroicDR; }
+	inline int32 GetHeroicPR() const override { return itembonuses.HeroicPR; }
+	inline int32 GetHeroicCR() const override { return itembonuses.HeroicCR; }
 	inline virtual int32 GetHeroicCorrup() const { return itembonuses.HeroicCorrup; }
 	// Mod2
 	inline virtual int32 GetShielding() const { return itembonuses.MeleeMitigation; }
@@ -256,7 +308,7 @@ public:
 	inline virtual int32 GetStringMod() const { return itembonuses.stringedMod; }
 	inline virtual int32 GetWindMod() const { return itembonuses.windMod; }
 
-	inline virtual int32 GetDelayDeath() const { return aabonuses.DelayDeath + spellbonuses.DelayDeath + itembonuses.DelayDeath; }
+	inline int32 GetDelayDeath() const override { return aabonuses.DelayDeath + spellbonuses.DelayDeath + itembonuses.DelayDeath; }
 
 	// "SET" Class Methods
 	void SetMercData (uint32 templateID );
@@ -285,6 +337,7 @@ public:
 	virtual float GetMaxMeleeRangeToTarget(Mob* target);
 	virtual void MercMeditate(bool isSitting);
 	bool FindTarget();
+	bool LoadMercenarySpells();
 
 protected:
 	int64 GetFocusEffect(focusType type, int32 spell_id, bool from_buff_tic = false);
@@ -302,6 +355,8 @@ protected:
 	uint8 sec_melee_type; //Sets the Secondary Weapon attack message and animation
 
 private:
+
+	std::array<int32, MercenaryStat::Count> BuildStatTable();
 
 	int32 CalcAC();
 	int32 CalcATK();
@@ -328,6 +383,7 @@ private:
 	int64 CalcMaxMana();
 	int64 CalcBaseMana();
 	int64 CalcManaRegen();
+	int64 CalcManaRegenValue(bool sitting) const;
 	int64 CalcBaseManaRegen();
 	int64 CalcManaRegenCap();
 	void CalcMaxEndurance(); //This calculates the maximum endurance we can have
@@ -346,9 +402,18 @@ private:
 
 	float GetDefaultSize();
 
-	bool LoadMercenarySpells();
 	bool CheckStance(int16 stance);
-	std::vector<MercSpell> GetMercSpells() { return merc_spells; }
+	void AddNPCsHatingGroup();
+	bool IsValidAssistTarget(Mob* target);
+	bool IsMercBeyondLeash(Mob* owner);
+	bool IsTargetBeyondLeash(Mob* owner, Mob* target);
+	void EndCombatIfHateListEmpty();
+	bool IsInCasterPosition(Mob* target);
+	Mob* GetCasterAnchor(Mob* target);
+	Mob* GetAssistTarget();
+	Mob* GetTankTarget();
+	std::unordered_map<uint16, Mob*>& GetNearbyMobs(float distance);
+	const std::vector<MercSpell>& GetMercSpells() const { return merc_spells; }
 
 	// Private "base stats" Members
 	int32 base_mana;
@@ -384,6 +449,7 @@ private:
 	uint8 _NameType;
 	uint8 _OwnerClientVersion;
 	uint8 _currentStance;
+	std::array<int32, MercenaryStat::Count> m_last_stat_table{};
 
 	EQ::InventoryProfile m_inv;
 	int64 max_end;
@@ -391,12 +457,28 @@ private:
 	bool _medding;
 	bool _suspended;
 	bool p_depop;
+	bool m_merc_depopped = false; // Depop runs once: death, owner disconnect and ~Client can all reach it
 	bool _check_confidence;
 	bool _lost_confidence;
 	int _hatedCount;
+	std::array<float, MAX_GROUP_MEMBERS> last_heal_check_hpr{};
+	uint8 nuke_cast_count;
+	float melee_range_factor;
+	uint16 melee_range_target_id;
 	uint32 owner_char_id;
 	Timer endupkeep_timer;
 	Timer rest_timer;
 	Timer confidence_timer;
 	Timer check_target_timer;
+	Timer pick_target_timer;
+	Timer engaged_buff_timer;
+	uint32 retarget_allowed_time;
+	uint32 follow_range_since;
+	std::array<uint32, static_cast<size_t>(MercChatter::Count)> chatter_next_time{};
+	uint32 step_back_allowed_time = 0;
+	uint32 step_back_until = 0;
+	uint16 called_target_id = 0;
+	uint32 called_until = 0;
+	uint32 called_heal_until = 0;
+	glm::vec4 follow_owner_position;
 };

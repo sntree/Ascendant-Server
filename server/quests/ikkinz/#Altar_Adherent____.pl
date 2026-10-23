@@ -10,7 +10,7 @@ sub EVENT_SPAWN {
 }
 
 sub EVENT_DEATH_COMPLETE {
-  if ($status >= 80 ) {
+  if (1) { # Ascendant: any class finishes it (was GM-only bypass of the rotating class requirement)
 	quest::ze(0,"The adherent's debris litters the ground. It has been beaten.");
     }
   elsif((($class eq "Bard") || ($class eq "Beastlord") || ($class eq "Paladin") || ($class eq "Ranger") || ($class eq "Shadowknight")) && ($qglobals{$instanceid.adhere5} == 2)) {

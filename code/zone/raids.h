@@ -131,6 +131,7 @@ public:
 	bool	IsRaidMember(const char* name);
 	bool	IsRaidMember(Client *c);
 	void	UpdateLevel(const char *name, int newLevel);
+	void	UpdateClass(const char *name, uint8 new_class);
 	void	SetNewRaidLeader(uint32 i);
 	bool    IsAssister(const char* who);
 	bool    IsMarker(const char* who);

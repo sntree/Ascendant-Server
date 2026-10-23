@@ -1,5 +1,5 @@
 local BIC_ITEM_ID        = 52154
-local RESPAWN_SECONDS    = 91 * 60
+local RESPAWN_SECONDS    = 45 * 60 -- Ascendant: was 91 minutes
 local CHECK_INTERVAL_MS  = 5 * 1000
 local TIMER_NAME         = "bic_check"
 local COOLDOWN_KEY       = "riwwi_ground_spawn"
@@ -34,8 +34,16 @@ local function spawn_random_ground_item(item_id)
   eq.create_ground_object(item_id, unpack(SPAWN_LOCS[idx]))
 end
 
+-- Ascendant: one cooldown per instance (like ferubi/Event_Spawner.lua), so open world and every DZ each get a key
+local function cooldown_key()
+  local instance_id = eq.get_zone_instance_id()
+  if instance_id == 0 then return COOLDOWN_KEY end
+  return COOLDOWN_KEY .. "-inst" .. instance_id
+end
+
 local function is_cooldown_active()
-  if eq.get_data(COOLDOWN_KEY) == nil or eq.get_data(COOLDOWN_KEY) == '' then
+  local value = eq.get_data(cooldown_key())
+  if value == nil or value == '' then
     return false
   else
     return true
@@ -43,7 +51,7 @@ local function is_cooldown_active()
 end
 
 local function start_cooldown()
-  eq.set_data(COOLDOWN_KEY, "1", tostring(RESPAWN_SECONDS))
+  eq.set_data(cooldown_key(), "1", tostring(RESPAWN_SECONDS))
 end
 
 function event_spawn(e)

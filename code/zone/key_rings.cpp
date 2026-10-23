@@ -40,6 +40,8 @@ namespace {
 	const char *KEY_RING_NAMES[EQ::invslot::KEYRING_COUNT] = {
 		"mount", "illusion", "familiar", "Hero's Forge", "teleportation", "activated"
 	};
+
+	const char *EQUIPMENT_KEY_RING_NAME = "equipment";
 }
 
 bool Client::IsKeyRingEnabled()
@@ -112,8 +114,19 @@ bool Client::MoveKeyRingItem(MoveItem_Struct *move_in)
 		return RemoveFromKeyRing(static_cast<int16>(from_slot), static_cast<int16>(to_slot));
 	}
 
+	// the Equipment ring only trades with the cursor
+	if (HasEquipmentKeyRing()) {
+		if (from_slot == EQ::invslot::slotCursor && EQ::invslot::IsEquipmentKeyRingRange(to_slot)) {
+			return AddToEquipmentKeyRing();
+		}
+
+		if (EQ::invslot::IsEquipmentKeyRingSlot(from_slot) && to_slot == EQ::invslot::slotCursor) {
+			return RemoveFromKeyRing(static_cast<int16>(from_slot), static_cast<int16>(to_slot));
+		}
+	}
+
 	// rings are off, or a ring to ring move (the client does not send those): put the item back
-	if (EQ::invslot::IsKeyRingSlot(from_slot)) {
+	if (EQ::invslot::IsKeyRingSlot(from_slot) || EQ::invslot::IsEquipmentKeyRingSlot(from_slot)) {
 		if (const auto inst = m_inv[from_slot]) {
 			SendItemPacket(static_cast<int16>(from_slot), inst, ItemPacketCharInventory);
 		}
@@ -134,8 +147,17 @@ bool Client::AddToKeyRing(int16 src_slot_id, int16 ring_slot_id)
 {
 	const int ring = EQ::invslot::KeyRingFromSlot(ring_slot_id);
 
-	// put the item back where the client took it from
-	auto refuse = [this, src_slot_id]() {
+	// put the item back where the client took it from. The client sends the ring row it put the item on (its
+	// next index) and shows it there already, so that row is cleared again
+	auto refuse = [this, src_slot_id, ring_slot_id]() {
+		if (EQ::invslot::IsKeyRingSlot(ring_slot_id)) {
+			if (const auto ring_inst = m_inv[ring_slot_id]) {
+				SendItemPacket(ring_slot_id, ring_inst, ItemPacketCharInventory);
+			} else {
+				DeleteItemInInventory(ring_slot_id, 0, true, false);
+			}
+		}
+
 		if (src_slot_id == EQ::invslot::slotCursor) {
 			if (const auto inst = m_inv.GetCursorItem()) {
 				SendItemPacket(EQ::invslot::slotCursor, inst, ItemPacketLimbo);
@@ -281,19 +303,227 @@ bool Client::RemoveFromKeyRing(int16 ring_slot_id, int16 dst_slot_id)
 	}
 
 	LogInventory(
-		"[{}] took [{}] ([{}]) out of key ring [{}] index [{}]",
+		"[{}] took [{}] ([{}]) out of key ring slot [{}]",
 		GetCleanName(),
 		inst->GetItem()->Name,
 		inst->GetID(),
-		EQ::invslot::KeyRingFromSlot(ring_slot_id),
-		EQ::invslot::KeyRingIndexFromSlot(ring_slot_id)
+		ring_slot_id
 	);
 
 	// the client already moved it: cursor row first, then drop the ring row
 	PutItemInInventory(EQ::invslot::slotCursor, *inst, false);
 	DeleteItemInInventory(ring_slot_id, 0, false);
 
+	if (EQ::invslot::IsEquipmentKeyRingSlot(ring_slot_id) && HasEquipmentKeyRing()) {
+		SendEquipmentKeyRingState();
+	}
+
 	return true;
+}
+
+int Client::GetEquipmentKeyRingCapacity()
+{
+	if (ClientVersion() < EQ::versions::ClientVersion::TOB) {
+		return 0;
+	}
+
+	return std::clamp(RuleI(Character, EquipmentKeyRingSlots), 0, static_cast<int>(EQ::invslot::EQUIPMENT_KEYRING_SIZE));
+}
+
+// gear only: something that has equipment slots and is not used up
+bool Client::CanAddToEquipmentKeyRing(const EQ::ItemInstance *inst)
+{
+	if (!inst || !inst->GetItem()) {
+		return false;
+	}
+
+	const auto item = inst->GetItem();
+
+	if (!item->IsClassCommon() || item->EvolvingItem || item->NoRent == 0) {
+		return false;
+	}
+
+	return item->Slots != 0 &&
+		item->ItemType != EQ::item::ItemTypePotion &&
+		item->Click.Type != EQ::item::ItemEffectExpendable;
+}
+
+int16 Client::FindFreeEquipmentKeyRingSlot()
+{
+	const auto &stored = m_inv.GetEquipmentKeyRingItems();
+	const int capacity = GetEquipmentKeyRingCapacity();
+	for (int index = 0; index < capacity; index++) {
+		if (!stored.contains(EQ::invslot::EquipmentKeyRingSlot(index))) {
+			return EQ::invslot::EquipmentKeyRingSlot(index);
+		}
+	}
+
+	return INVALID_INDEX;
+}
+
+// gear taken off by a persona switch or equipment set load goes to the ring when the player ticked the box
+namespace {
+	// the client's Store Equipment Set items option, kept so a zone-in without the tab's hello still stores
+	const std::string EQUIPMENT_KEY_RING_STORE_BUCKET = "equipment_keyring_store_sets";
+}
+
+// the ring can hold gear for a client that has not announced the tab yet; it sees the items after its hello
+bool Client::IsStoringEquipmentSets()
+{
+	if (m_has_equipment_key_ring) {
+		return m_store_equipment_sets;
+	}
+
+	return GetEquipmentKeyRingCapacity() > 0 && GetBucket(EQUIPMENT_KEY_RING_STORE_BUCKET) == "1";
+}
+
+bool Client::CanStoreInEquipmentKeyRing(const EQ::ItemInstance *inst)
+{
+	return IsStoringEquipmentSets() && CanAddToEquipmentKeyRing(inst) && FindFreeEquipmentKeyRingSlot() != INVALID_INDEX;
+}
+
+// copies inst into the first free ring slot and saves it; the caller owns inst and tells the client
+int16 Client::StoreInEquipmentKeyRing(const EQ::ItemInstance &inst)
+{
+	const int16 slot_id = FindFreeEquipmentKeyRingSlot();
+	if (slot_id == INVALID_INDEX || m_inv.PutItem(slot_id, inst) == INVALID_INDEX) {
+		return INVALID_INDEX;
+	}
+
+	const auto stored = m_inv[slot_id];
+	if (!stored || !database.SaveInventory(CharacterID(), stored, slot_id)) {
+		m_inv.DeleteItem(slot_id);
+		return INVALID_INDEX;
+	}
+
+	LogInventory(
+		"[{}] stored [{}] ([{}]) in equipment key ring slot [{}]",
+		GetCleanName(),
+		stored->GetItem()->Name,
+		stored->GetID(),
+		slot_id
+	);
+
+	return slot_id;
+}
+
+// the client dropped the cursor item on the tab
+bool Client::AddToEquipmentKeyRing()
+{
+	// put the item back on the cursor
+	auto refuse = [this]() {
+		if (const auto cursor = m_inv.GetCursorItem()) {
+			SendItemPacket(EQ::invslot::slotCursor, cursor, ItemPacketLimbo);
+		}
+
+		return false;
+	};
+
+	const auto inst = m_inv.GetCursorItem();
+	if (!inst || !inst->GetItem()) {
+		return refuse();
+	}
+
+	if (!CanAddToEquipmentKeyRing(inst)) {
+		MessageString(Chat::Red, KEY_RING_WRONG_TYPE, EQUIPMENT_KEY_RING_NAME);
+		return refuse();
+	}
+
+	if (FindFreeEquipmentKeyRingSlot() == INVALID_INDEX) {
+		MessageString(Chat::Red, KEY_RING_FULL, inst->GetItem()->Name, EQUIPMENT_KEY_RING_NAME);
+		return refuse();
+	}
+
+	const int16 slot_id = StoreInEquipmentKeyRing(*inst);
+	if (slot_id == INVALID_INDEX) {
+		return refuse();
+	}
+
+	// the client already took the item off its cursor, so there is no delete echo
+	DeleteItemInInventory(EQ::invslot::slotCursor, 0, false);
+	SendCursorBuffer();
+
+	SendItemPacket(slot_id, m_inv[slot_id], ItemPacketCharInventory);
+	SendEquipmentKeyRingState();
+
+	return true;
+}
+
+// the state also labels each stored item with the class whose equipment set holds it
+void Client::SendEquipmentKeyRingState()
+{
+	EQApplicationPacket outapp(OP_EquipmentKeyRingOption, sizeof(EquipmentKeyRingState_Struct));
+	auto state                  = reinterpret_cast<EquipmentKeyRingState_Struct *>(outapp.pBuffer);
+	state->capacity             = m_has_equipment_key_ring ? GetEquipmentKeyRingCapacity() : 0;
+	state->store_equipment_sets = m_store_equipment_sets ? 1 : 0;
+
+	if (m_has_equipment_key_ring && !m_inv.GetEquipmentKeyRingItems().empty()) {
+		const auto owners = Persona::LoadEquipmentSetOwners(database, CharacterID());
+		for (const auto &[slot_id, inst] : m_inv.GetEquipmentKeyRingItems()) {
+			if (!inst || state->owner_count >= std::size(state->owners)) {
+				continue;
+			}
+
+			const auto owner = owners.find(static_cast<uint32>(inst->GetSerialNumber()));
+			if (owner == owners.end()) {
+				continue;
+			}
+
+			auto &entry      = state->owners[state->owner_count++];
+			entry.index      = static_cast<uint16>(slot_id - EQ::invslot::EQUIPMENT_KEYRING_BEGIN);
+			entry.class_mask = owner->second;
+		}
+	}
+
+	QueuePacket(&outapp);
+}
+
+void Client::SendEquipmentKeyRingItems()
+{
+	if (!m_has_equipment_key_ring) {
+		return;
+	}
+
+	for (const auto &[slot_id, inst] : m_inv.GetEquipmentKeyRingItems()) {
+		SendItemPacket(slot_id, inst, ItemPacketCharInventory);
+	}
+}
+
+// the Equipment tab's hello, and again each time its box changes
+void Client::Handle_OP_EquipmentKeyRingOption(const EQApplicationPacket *app)
+{
+	if (app->size != sizeof(EquipmentKeyRingOption_Struct)) {
+		LogNetcode("Received invalid sized OP_EquipmentKeyRingOption: got [{}], expected [{}]", app->size, sizeof(EquipmentKeyRingOption_Struct));
+		return;
+	}
+
+	const auto option = reinterpret_cast<const EquipmentKeyRingOption_Struct *>(app->pBuffer);
+
+	// a client with the ring off hears capacity 0 and hides the tab
+	const bool enabled = GetEquipmentKeyRingCapacity() > 0;
+	const bool first   = enabled && !m_has_equipment_key_ring;
+
+	m_has_equipment_key_ring = enabled;
+	m_store_equipment_sets   = enabled && option->store_equipment_sets != 0;
+
+	if (enabled) {
+		SetBucket(EQUIPMENT_KEY_RING_STORE_BUCKET, m_store_equipment_sets ? "1" : "0");
+	}
+
+	LogInventory(
+		"[{}] equipment key ring option [{}], tab [{}]",
+		GetCleanName(),
+		m_store_equipment_sets,
+		m_has_equipment_key_ring
+	);
+
+	SendEquipmentKeyRingState();
+
+	// the capacity has to arrive before the items, the labels after them
+	if (first) {
+		SendEquipmentKeyRingItems();
+		SendEquipmentKeyRingState();
+	}
 }
 
 bool Client::IsKeyRingUnlocked(int ring)

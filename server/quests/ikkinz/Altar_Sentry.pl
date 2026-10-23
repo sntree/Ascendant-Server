@@ -11,7 +11,7 @@ sub EVENT_SPAWN {
 }
 
 sub EVENT_DEATH_COMPLETE {
-  if ( $status >= 80 ) {
+  if (1) { # Ascendant: any class finishes it (was GM-only bypass of the rotating class requirement)
     quest::spawn2(294628,0,0,$x,$y,$z,$h); # NPC: a_pile_of_bones
 	quest::ze(0,"The stone worker crumbles to the ground, its energy drained.");
     }

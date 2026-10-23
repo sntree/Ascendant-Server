@@ -2371,7 +2371,9 @@ void ZoneDatabase::SaveMercenaryBuffs(Merc* m)
 
 	auto e = MercBuffsRepository::NewEntity();
 
-	for (uint32 slot_id = 0; slot_id <= BUFF_COUNT; slot_id++) {
+	const int max_slots = m->GetMaxBuffSlots();
+
+	for (int slot_id = 0; slot_id < max_slots; slot_id++) {
 		if (!IsValidSpell(buffs[slot_id].spellid)) {
 			continue;
 		}
@@ -2422,11 +2424,15 @@ void ZoneDatabase::LoadMercenaryBuffs(Merc* m)
 		return;
 	}
 
-	uint32 slot_id = 0;
+	int slot_id = 0;
 
 	for (const auto& e : l) {
-		if (slot_id == BUFF_COUNT) {
+		if (slot_id >= max_slots) {
 			break;
+		}
+
+		if (!IsValidSpell(e.SpellId)) {
+			continue;
 		}
 
 		buffs[slot_id].spellid         = e.SpellId;
@@ -2460,6 +2466,9 @@ void ZoneDatabase::LoadMercenaryBuffs(Merc* m)
 		if (CalculateCorruptionCounters(buffs[slot_id].spellid) > 0) {
 			buffs[slot_id].counters = e.CorruptionCounters;
 		}
+
+		// advance only once a buff is stored so the rows pack into consecutive slots
+		slot_id++;
 	}
 
 	MercBuffsRepository::DeleteWhere(
@@ -2608,15 +2617,19 @@ void ZoneDatabase::RefreshGroupFromDB(Client *client){
 
 	int index = 0;
 
+	// The owner name is only set for a mercenary; it lets the client tell a merc from a player
 	auto query = fmt::format(
-		"SELECT name FROM group_id WHERE group_id = {}",
+		"SELECT g.name, c.name FROM group_id g "
+		"LEFT JOIN mercs m ON g.merc_id = m.MercID "
+		"LEFT JOIN character_data c ON c.id = m.OwnerCharacterID "
+		"WHERE g.group_id = {}",
 		group->GetID()
 	);
 	auto results = QueryDatabase(query);
 
 	if (results.Success()) {
 		for (auto row : results) {
-			if (index >= 6) {
+			if (index >= 5) {
 				continue;
 			}
 
@@ -2625,6 +2638,27 @@ void ZoneDatabase::RefreshGroupFromDB(Client *client){
 			}
 
 			strcpy(gu->membername[index], row[0]);
+
+			const char* merc_owner_name = row[1];
+
+			for (int i = 0; i < MAX_GROUP_MEMBERS; i++) {
+				Mob* member = group->members[i];
+
+				if (member && member->IsMerc() && !strcmp(member->GetCleanName(), row[0])) {
+					Client* merc_owner = member->CastToMerc()->GetMercenaryOwner();
+
+					if (merc_owner) {
+						merc_owner_name = merc_owner->GetCleanName();
+					}
+
+					break;
+				}
+			}
+
+			if (merc_owner_name) {
+				strn0cpy(gu->member_merc_owner[index], merc_owner_name, sizeof(gu->member_merc_owner[index]));
+			}
+
 			index++;
 		}
 	}

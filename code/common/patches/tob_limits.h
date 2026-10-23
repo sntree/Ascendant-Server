@@ -66,6 +66,8 @@ namespace TOB
 				typeViewModTeleportationKeyRingItems,
 				typeActivatedKeyRingItems,
 				typeViewModActivatedKeyRingItems,
+				typeEquipmentKeyRingItems,
+				typeViewModEquipmentKeyRingItems,
 				typeOverflow,
 				typeDragonHoard = 42, // as seen on Live
 				typeTradeskillDepot,

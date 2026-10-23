@@ -216,6 +216,9 @@ const char* QuestEventSubroutines[_LargestEventID] = {
 	"EVENT_IDLE_ON",
 	"EVENT_IDLE_OFF",
 	"EVENT_ACHIEVEMENT_COMPLETE",
+	"EVENT_PERSONA_CREATE",
+	"EVENT_PERSONA_SWITCH",
+	"EVENT_PERSONA_SWITCHED",
 
 	// Add new events before these or Lua crashes
 	"EVENT_SPELL_EFFECT_BOT",
@@ -2580,6 +2583,19 @@ void PerlembParser::ExportEventVariables(
 
 		case EVENT_ACHIEVEMENT_COMPLETE: {
 			ExportVar(package_name.c_str(), "achievement_id", data);
+			break;
+		}
+
+		case EVENT_PERSONA_CREATE: {
+			ExportVar(package_name.c_str(), "persona_class", data);
+			break;
+		}
+
+		case EVENT_PERSONA_SWITCH:
+		case EVENT_PERSONA_SWITCHED: {
+			Seperator sep(data);
+			ExportVar(package_name.c_str(), "old_class", sep.arg[0]);
+			ExportVar(package_name.c_str(), "new_class", sep.arg[1]);
 			break;
 		}
 

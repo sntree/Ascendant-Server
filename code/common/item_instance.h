@@ -309,6 +309,7 @@ namespace EQ
 		static void SetSerialBlockAllocator(std::function<bool(int32 &start, int32 &end)> allocator);
 		// true the first time a persisted serial (inventory guid) is claimed in this process
 		static bool ClaimPersistedSerial(int32 serial);
+		static void ReleasePersistedSerials(ItemInstance *inst); // the item and its contents, when they leave memory
 
 		// evolving items stuff
 		CharacterEvolvingItemsRepository::CharacterEvolvingItems &GetEvolvingDetails() const { return m_evolving_details; }

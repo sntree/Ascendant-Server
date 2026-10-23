@@ -248,6 +248,334 @@ CREATE TABLE `account_marketplace_ledger` (
 )",
 		.content_schema_update = false,
 	},
+	ManifestEntry{
+		.version = 14,
+		.description = "2026_10_19_fellowships",
+		.check = "SHOW TABLES LIKE 'fellowships'",
+		.condition = "empty",
+		.match = "",
+		.sql = R"(
+CREATE TABLE `fellowships` (
+  `id` int unsigned NOT NULL AUTO_INCREMENT,
+  `leader_id` int unsigned NOT NULL,
+  `motd` varchar(1023) NOT NULL DEFAULT '',
+  `created_at` int unsigned NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `leader_id` (`leader_id`)
+);
+CREATE TABLE `fellowship_members` (
+  `character_id` int unsigned NOT NULL,
+  `fellowship_id` int unsigned NOT NULL,
+  `joined_at` int unsigned NOT NULL,
+  `is_exp_sharing` tinyint unsigned NOT NULL DEFAULT 0,
+  PRIMARY KEY (`character_id`),
+  KEY `fellowship_id` (`fellowship_id`)
+);
+CREATE TABLE `fellowship_campsites` (
+  `fellowship_id` int unsigned NOT NULL,
+  `zone_id` smallint unsigned NOT NULL,
+  `instance_id` smallint unsigned NOT NULL,
+  `x` float NOT NULL,
+  `y` float NOT NULL,
+  `z` float NOT NULL,
+  `heading` float NOT NULL,
+  `campfire_type` int unsigned NOT NULL,
+  `placed_at` int unsigned NOT NULL,
+  `expires_at` int unsigned NOT NULL,
+  PRIMARY KEY (`fellowship_id`)
+);
+)",
+		.content_schema_update = false,
+	},
+	ManifestEntry{
+		.version = 15,
+		.description = "2026_10_19_character_personas",
+		.check = "SHOW TABLES LIKE 'character_personas'",
+		.condition = "empty",
+		.match = "",
+		.sql = R"(
+CREATE TABLE IF NOT EXISTS `character_persona_spells` (
+  `character_id` int unsigned NOT NULL,
+  `class_id` tinyint unsigned NOT NULL,
+  `slot_id` smallint unsigned NOT NULL,
+  `spell_id` int NOT NULL,
+  PRIMARY KEY (`character_id`, `class_id`, `slot_id`)
+) ENGINE=InnoDB;
+CREATE TABLE IF NOT EXISTS `character_persona_memmed_spells` (
+  `character_id` int unsigned NOT NULL,
+  `class_id` tinyint unsigned NOT NULL,
+  `slot_id` smallint unsigned NOT NULL,
+  `spell_id` int NOT NULL,
+  PRIMARY KEY (`character_id`, `class_id`, `slot_id`)
+) ENGINE=InnoDB;
+CREATE TABLE IF NOT EXISTS `character_persona_disciplines` (
+  `character_id` int unsigned NOT NULL,
+  `class_id` tinyint unsigned NOT NULL,
+  `slot_id` smallint unsigned NOT NULL,
+  `disc_id` smallint unsigned NOT NULL,
+  PRIMARY KEY (`character_id`, `class_id`, `slot_id`)
+) ENGINE=InnoDB;
+CREATE TABLE IF NOT EXISTS `character_persona_skills` (
+  `character_id` int unsigned NOT NULL,
+  `class_id` tinyint unsigned NOT NULL,
+  `skill_id` smallint unsigned NOT NULL,
+  `value` smallint unsigned NOT NULL,
+  PRIMARY KEY (`character_id`, `class_id`, `skill_id`)
+) ENGINE=InnoDB;
+CREATE TABLE IF NOT EXISTS `character_persona_alternate_abilities` (
+  `character_id` int unsigned NOT NULL,
+  `class_id` tinyint unsigned NOT NULL,
+  `aa_id` smallint unsigned NOT NULL,
+  `aa_value` smallint unsigned NOT NULL,
+  `charges` smallint unsigned NOT NULL,
+  PRIMARY KEY (`character_id`, `class_id`, `aa_id`)
+) ENGINE=InnoDB;
+CREATE TABLE IF NOT EXISTS `character_persona_bind` (
+  `character_id` int unsigned NOT NULL,
+  `class_id` tinyint unsigned NOT NULL,
+  `slot` int NOT NULL,
+  `zone_id` smallint unsigned NOT NULL,
+  `instance_id` mediumint unsigned NOT NULL,
+  `x` float NOT NULL,
+  `y` float NOT NULL,
+  `z` float NOT NULL,
+  `heading` float NOT NULL,
+  PRIMARY KEY (`character_id`, `class_id`, `slot`)
+) ENGINE=InnoDB;
+CREATE TABLE IF NOT EXISTS `character_persona_buffs` (
+  `character_id` int unsigned NOT NULL,
+  `class_id` tinyint unsigned NOT NULL,
+  `slot_id` tinyint unsigned NOT NULL,
+  `spell_id` int NOT NULL,
+  `caster_level` tinyint unsigned NOT NULL,
+  `caster_name` varchar(64) NOT NULL,
+  `ticsremaining` int NOT NULL,
+  `initialduration` int NOT NULL,
+  `counters` int unsigned NOT NULL,
+  `numhits` int unsigned NOT NULL,
+  `melee_rune` int unsigned NOT NULL,
+  `magic_rune` int unsigned NOT NULL,
+  `persistent` tinyint unsigned NOT NULL,
+  `dot_rune` int unsigned NOT NULL,
+  `caston_x` int NOT NULL,
+  `caston_y` int NOT NULL,
+  `caston_z` int NOT NULL,
+  `ExtraDIChance` int NOT NULL,
+  `instrument_mod` int NOT NULL,
+  PRIMARY KEY (`character_id`, `class_id`, `slot_id`)
+) ENGINE=InnoDB;
+CREATE TABLE IF NOT EXISTS `character_persona_bandolier` (
+  `character_id` int unsigned NOT NULL,
+  `class_id` tinyint unsigned NOT NULL,
+  `bandolier_id` tinyint unsigned NOT NULL,
+  `bandolier_slot` tinyint unsigned NOT NULL,
+  `item_id` int unsigned NOT NULL,
+  `icon` int unsigned NOT NULL,
+  `bandolier_name` varchar(32) NOT NULL,
+  PRIMARY KEY (`character_id`, `class_id`, `bandolier_id`, `bandolier_slot`)
+) ENGINE=InnoDB;
+CREATE TABLE IF NOT EXISTS `character_persona_timers` (
+  `character_id` int unsigned NOT NULL,
+  `class_id` tinyint unsigned NOT NULL,
+  `type` mediumint unsigned NOT NULL,
+  `start` int unsigned NOT NULL,
+  `duration` int unsigned NOT NULL,
+  `enable` tinyint NOT NULL,
+  PRIMARY KEY (`character_id`, `class_id`, `type`)
+) ENGINE=InnoDB;
+CREATE TABLE IF NOT EXISTS `character_persona_pet_info` (
+  `character_id` int unsigned NOT NULL,
+  `class_id` tinyint unsigned NOT NULL,
+  `pet` int NOT NULL,
+  `petname` varchar(64) NOT NULL,
+  `petpower` int NOT NULL,
+  `spell_id` int NOT NULL,
+  `hp` int NOT NULL,
+  `mana` int NOT NULL,
+  `size` float NOT NULL,
+  `taunting` tinyint NOT NULL,
+  PRIMARY KEY (`character_id`, `class_id`, `pet`)
+) ENGINE=InnoDB;
+CREATE TABLE IF NOT EXISTS `character_persona_pet_buffs` (
+  `character_id` int unsigned NOT NULL,
+  `class_id` tinyint unsigned NOT NULL,
+  `pet` int NOT NULL,
+  `slot_id` tinyint unsigned NOT NULL,
+  `spell_id` int NOT NULL,
+  `caster_level` tinyint unsigned NOT NULL,
+  `caster_name` varchar(64) NOT NULL,
+  `ticsremaining` int NOT NULL,
+  `initialduration` int NOT NULL,
+  `counters` int unsigned NOT NULL,
+  `numhits` int unsigned NOT NULL,
+  `melee_rune` int unsigned NOT NULL,
+  `magic_rune` int unsigned NOT NULL,
+  `persistent` tinyint unsigned NOT NULL,
+  `dot_rune` int unsigned NOT NULL,
+  `caston_x` int NOT NULL,
+  `caston_y` int NOT NULL,
+  `caston_z` int NOT NULL,
+  `ExtraDIChance` int NOT NULL,
+  `instrument_mod` int unsigned NOT NULL,
+  PRIMARY KEY (`character_id`, `class_id`, `pet`, `slot_id`)
+) ENGINE=InnoDB;
+CREATE TABLE IF NOT EXISTS `character_persona_pet_inventory` (
+  `character_id` int unsigned NOT NULL,
+  `class_id` tinyint unsigned NOT NULL,
+  `pet` int NOT NULL,
+  `slot` int NOT NULL,
+  `item_id` int NOT NULL,
+  PRIMARY KEY (`character_id`, `class_id`, `pet`, `slot`)
+) ENGINE=InnoDB;
+CREATE TABLE IF NOT EXISTS `character_persona_data_buckets` (
+  `character_id` int unsigned NOT NULL,
+  `class_id` tinyint unsigned NOT NULL,
+  `key` varchar(100) NOT NULL,
+  `value` text,
+  `expires` int unsigned NOT NULL,
+  PRIMARY KEY (`character_id`, `class_id`, `key`)
+) ENGINE=InnoDB;
+CREATE TABLE `character_personas` (
+  `character_id` int unsigned NOT NULL,
+  `class_id` tinyint unsigned NOT NULL,
+  `level` int unsigned NOT NULL,
+  `level2` tinyint unsigned NOT NULL,
+  `exp` int unsigned NOT NULL,
+  `points` int unsigned NOT NULL,
+  `aa_points` int unsigned NOT NULL,
+  `aa_exp` int unsigned NOT NULL,
+  `aa_points_spent` int unsigned NOT NULL,
+  `e_aa_effects` int unsigned NOT NULL,
+  `e_percent_to_aa` int unsigned NOT NULL,
+  `e_expended_aa_spent` int unsigned NOT NULL,
+  `deity` int unsigned NOT NULL,
+  `gender` tinyint unsigned NOT NULL,
+  `face` int unsigned NOT NULL,
+  `hair_color` tinyint unsigned NOT NULL,
+  `hair_style` tinyint unsigned NOT NULL,
+  `beard` tinyint unsigned NOT NULL,
+  `beard_color` tinyint unsigned NOT NULL,
+  `eye_color_1` tinyint unsigned NOT NULL,
+  `eye_color_2` tinyint unsigned NOT NULL,
+  `drakkin_heritage` int unsigned NOT NULL,
+  `drakkin_tattoo` int unsigned NOT NULL,
+  `drakkin_details` int unsigned NOT NULL,
+  `str` int unsigned NOT NULL,
+  `sta` int unsigned NOT NULL,
+  `cha` int unsigned NOT NULL,
+  `dex` int unsigned NOT NULL,
+  `int` int unsigned NOT NULL,
+  `agi` int unsigned NOT NULL,
+  `wis` int unsigned NOT NULL,
+  `cur_hp` int unsigned NOT NULL,
+  `mana` int unsigned NOT NULL,
+  `endurance` int unsigned NOT NULL,
+  `ability_number` tinyint unsigned NOT NULL,
+  `ability_time_seconds` tinyint unsigned NOT NULL,
+  `ability_time_minutes` tinyint unsigned NOT NULL,
+  `ability_time_hours` tinyint unsigned NOT NULL,
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`character_id`, `class_id`)
+) ENGINE=InnoDB;
+)",
+		.content_schema_update = false,
+	},
+	ManifestEntry{
+		.version = 16,
+		.description = "2026_10_19_character_personas_race",
+		.check = "SHOW COLUMNS FROM `character_personas` LIKE 'race'",
+		.condition = "empty",
+		.match = "",
+		.sql = R"(
+ALTER TABLE `character_personas` ADD COLUMN `race` smallint unsigned NOT NULL AFTER `class_id`;
+UPDATE `character_personas` p JOIN `character_data` d ON d.`id` = p.`character_id` SET p.`race` = d.`race`;
+)",
+		.content_schema_update = false,
+	},
+	ManifestEntry{
+		.version = 17,
+		.description = "2026_10_20_character_equipment_sets",
+		.check = "SHOW TABLES LIKE 'character_equipment_sets'",
+		.condition = "empty",
+		.match = "",
+		.sql = R"(
+CREATE TABLE `character_equipment_sets` (
+  `character_id` int unsigned NOT NULL,
+  `class_id` tinyint unsigned NOT NULL,
+  `slot_id` smallint unsigned NOT NULL,
+  `item_serial` int unsigned NOT NULL,
+  PRIMARY KEY (`character_id`, `class_id`, `slot_id`)
+) ENGINE=InnoDB;
+)",
+		.content_schema_update = false,
+	},
+	ManifestEntry{
+		.version = 18,
+		.description = "2026_10_21_god_hot_native_aa_level65",
+		.check = "SELECT n.id FROM aa_ranks n JOIN aa_ranks u ON u.id = n.id + 20000 WHERE u.id BETWEEN 20000 AND 39999 AND u.expansion = 17 AND u.level_req = 65 AND n.expansion = 17 AND n.level_req = 70 LIMIT 1",
+		.condition = "not_empty",
+		.match = "",
+		.sql = R"(
+UPDATE aa_ranks n JOIN aa_ranks u ON u.id = n.id + 20000
+SET n.level_req = 65
+WHERE u.id BETWEEN 20000 AND 39999 AND u.expansion = 17 AND u.level_req = 65
+  AND n.expansion = 17 AND n.level_req = 70;
+)",
+		.content_schema_update = true,
+	},
+	ManifestEntry{
+		.version = 19,
+		.description = "2026_10_21_aa_swarm_pets_runspeed",
+		.check = "SELECT id FROM npc_types WHERE runspeed = 0 AND id IN (675,684,954,955,956,957,958,959,960,961,962,963,1318,1319,1320,1321,1322,1323,1324,1325,1326,1327,1328,1329,1330,1331,1332,1333,1334,1335,1336,1337,1338,1339,1340,1341,1342,1343,1344,1345,1346,1347,1348,1349,1350,1351,1352,1353,1354,1355,1356,1357,1358,1359,1360,1361,1362,1363,1364,1365,1366,1367,1368,1369,1370,1371,1372,1373,1374,1375,1376,1377,1378,1379,1380,1381,1382,1383,1384,1385,1386,1387,1388,1389,1408,1409,1410,1411,1412,1413,1414,1415,1416,1417,1418,1419) LIMIT 1",
+		.condition = "not_empty",
+		.match = "",
+		.sql = R"(
+UPDATE npc_types SET runspeed = 1.25 WHERE runspeed = 0 AND id IN (675,684,954,955,956,957,958,959,960,961,962,963,1318,1319,1320,1321,1322,1323,1324,1325,1326,1327,1328,1329,1330,1331,1332,1333,1334,1335,1336,1337,1338,1339,1340,1341,1342,1343,1344,1345,1346,1347,1348,1349,1350,1351,1352,1353,1354,1355,1356,1357,1358,1359,1360,1361,1362,1363,1364,1365,1366,1367,1368,1369,1370,1371,1372,1373,1374,1375,1376,1377,1378,1379,1380,1381,1382,1383,1384,1385,1386,1387,1388,1389,1408,1409,1410,1411,1412,1413,1414,1415,1416,1417,1418,1419);
+)",
+		.content_schema_update = true,
+	},
+	ManifestEntry{
+		.version = 20,
+		.description = "2026_10_21_bard_swarm_pet_no_mez",
+		.check = "SELECT id FROM npc_types WHERE id = 654 AND npc_spells_id = 11",
+		.condition = "not_empty",
+		.match = "",
+		.sql = R"(
+UPDATE npc_types SET npc_spells_id = 0 WHERE id = 654;
+)",
+		.content_schema_update = true,
+	},
+	ManifestEntry{
+		.version = 21,
+		.description = "2026_10_21_marks_vendor_morphemic_staff",
+		.check = "SELECT item FROM merchantlist WHERE merchantid = 344046 AND item = 66617",
+		.condition = "empty",
+		.match = "",
+		.sql = R"(
+INSERT INTO merchantlist (merchantid, slot, item, faction_required, level_required, min_status, max_status, alt_currency_cost, classes_required, probability, bucket_name, bucket_value, bucket_comparison, min_expansion, max_expansion)
+VALUES (344046, 13, 66617, -1100, 0, 0, 255, 5, 65535, 100, '', '', 0, -1, -1);
+UPDATE items SET ldonsellbackrate = 0 WHERE id = 66617;
+)",
+		.content_schema_update = true,
+	},
+	ManifestEntry{
+		.version = 22,
+		.description = "2026_10_21_bag_tier_slots_over_10",
+		.check = "SELECT t.id FROM items t JOIN items b ON t.id = b.id + 300000 WHERE b.id < 200000 AND b.bagslots > 10 AND t.bagslots < b.bagslots + 2 UNION ALL SELECT t.id FROM items t JOIN items b ON t.id = b.id + 500000 WHERE b.id < 200000 AND b.bagslots > 10 AND t.bagslots < b.bagslots + 4 UNION ALL SELECT t.id FROM items t JOIN items b ON t.id = b.id + 700000 WHERE b.id < 200000 AND b.bagslots > 10 AND t.bagslots < b.bagslots + 6 LIMIT 1",
+		.condition = "not_empty",
+		.match = "",
+		.sql = R"(
+CREATE TABLE IF NOT EXISTS items_bagslots_bak_20261021 (id INT NOT NULL PRIMARY KEY, bagslots INT NOT NULL);
+INSERT IGNORE INTO items_bagslots_bak_20261021 (id, bagslots)
+SELECT t.id, t.bagslots FROM items t JOIN items b ON t.id = b.id + 300000 WHERE b.id < 200000 AND b.bagslots > 10
+UNION ALL SELECT t.id, t.bagslots FROM items t JOIN items b ON t.id = b.id + 500000 WHERE b.id < 200000 AND b.bagslots > 10
+UNION ALL SELECT t.id, t.bagslots FROM items t JOIN items b ON t.id = b.id + 700000 WHERE b.id < 200000 AND b.bagslots > 10;
+UPDATE items t JOIN items b ON t.id = b.id + 300000 SET t.bagslots = b.bagslots + 2 WHERE b.id < 200000 AND b.bagslots > 10;
+UPDATE items t JOIN items b ON t.id = b.id + 500000 SET t.bagslots = b.bagslots + 4 WHERE b.id < 200000 AND b.bagslots > 10;
+UPDATE items t JOIN items b ON t.id = b.id + 700000 SET t.bagslots = b.bagslots + 6 WHERE b.id < 200000 AND b.bagslots > 10;
+)",
+		.content_schema_update = true,
+	},
 // Used for testing
 //	ManifestEntry{
 //		.version = 9229,

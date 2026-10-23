@@ -583,6 +583,15 @@ void Raid::UpdateLevel(const char *name, int newLevel)
 	VerifyRaid();
 }
 
+void Raid::UpdateClass(const char *name, uint8 new_class)
+{
+	const std::string query = fmt::format("UPDATE raid_members SET _class = {} WHERE name = '{}'", new_class, name);
+	database.QueryDatabase(query);
+
+	LearnMembers();
+	VerifyRaid();
+}
+
 uint32 Raid::GetFreeGroup()
 {
 	//check each group return the first one with 0 members assigned...

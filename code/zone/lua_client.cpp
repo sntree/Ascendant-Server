@@ -3778,6 +3778,39 @@ bool Lua_Client::SetMarketplaceCoins(uint32 amount, std::string note)
 	return self->SetMarketplaceCoins(amount, "quest", note);
 }
 
+luabind::object Lua_Client::GetPersonaClasses(lua_State* L)
+{
+	auto lua_table = luabind::newtable(L);
+	if (d_) {
+		auto self = reinterpret_cast<NativeType*>(d_);
+		for (const auto& [class_id, level] : self->GetPersonaClasses()) {
+			lua_table[static_cast<int>(class_id)] = static_cast<int>(level);
+		}
+	}
+
+	return lua_table;
+}
+
+uint8 Lua_Client::GetPersonaLevel(uint32 class_id)
+{
+	Lua_Safe_Call_Int();
+	if (class_id < Class::Warrior || class_id > Class::PLAYER_CLASS_COUNT) {
+		return 0;
+	}
+
+	return self->GetPersonaLevel(static_cast<uint8>(class_id));
+}
+
+bool Lua_Client::HasPersona(uint32 class_id)
+{
+	Lua_Safe_Call_Bool();
+	if (class_id < Class::Warrior || class_id > Class::PLAYER_CLASS_COUNT) {
+		return false;
+	}
+
+	return self->HasPersona(static_cast<uint8>(class_id));
+}
+
 bool Lua_Client::AddTradeskillDepotItem(uint32 item_id, uint32 quantity)
 {
 	Lua_Safe_Call_Bool();
@@ -4052,6 +4085,8 @@ luabind::scope lua_register_client() {
 	.def("GetNextAvailableDisciplineSlot", (int(Lua_Client::*)(void))&Lua_Client::GetNextAvailableDisciplineSlot)
 	.def("GetNextAvailableSpellBookSlot", (int(Lua_Client::*)(int))&Lua_Client::GetNextAvailableSpellBookSlot)
 	.def("GetNextAvailableSpellBookSlot", (int(Lua_Client::*)(void))&Lua_Client::GetNextAvailableSpellBookSlot)
+	.def("GetPersonaClasses", (luabind::object(Lua_Client::*)(lua_State*))&Lua_Client::GetPersonaClasses)
+	.def("GetPersonaLevel", (uint8(Lua_Client::*)(uint32))&Lua_Client::GetPersonaLevel)
 	.def("GetPotionBeltItemIcon", (uint32(Lua_Client::*)(uint8))&Lua_Client::GetPotionBeltItemIcon)
 	.def("GetPotionBeltItemID", (uint32(Lua_Client::*)(uint8))&Lua_Client::GetPotionBeltItemID)
 	.def("GetPotionBeltItemName", (std::string(Lua_Client::*)(uint8))&Lua_Client::GetPotionBeltItemName)
@@ -4101,6 +4136,7 @@ luabind::scope lua_register_client() {
 	.def("HasItemEquippedByID", (bool(Lua_Client::*)(uint32))&Lua_Client::HasItemEquippedByID)
 	.def("HasItemOnCorpse", (bool(Lua_Client::*)(uint32))&Lua_Client::HasItemOnCorpse)
 	.def("HasPEQZoneFlag", (bool(Lua_Client::*)(uint32))&Lua_Client::HasPEQZoneFlag)
+	.def("HasPersona", (bool(Lua_Client::*)(uint32))&Lua_Client::HasPersona)
 	.def("HasRecipeLearned", (bool(Lua_Client::*)(uint32))&Lua_Client::HasRecipeLearned)
 	.def("HasSkill", (bool(Lua_Client::*)(int))&Lua_Client::HasSkill)
 	.def("HasSpellScribed", (bool(Lua_Client::*)(int))&Lua_Client::HasSpellScribed)

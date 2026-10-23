@@ -17,7 +17,7 @@ local catacombs = {
 }
 
 for i=1,#catacombs do
-	catacombs[i].expedition = { name="Catacombs of Dranik", min_players=3, max_players=6 }
+	catacombs[i].expedition = { name="Catacombs of Dranik", min_players=1, max_players=6 }
 	catacombs[i].compass    = { zone="dranik", x=-292.35, y=1049.05, z=-82.54 }
 	catacombs[i].safereturn = { zone="dranik", x=-291.375, y=1027.125, z=-76.25, h=0.0 }
 end
@@ -38,7 +38,7 @@ local sewers = {
 }
 
 for i=1,#sewers do
-	sewers[i].expedition = { name="Sewers of Dranik", min_players=3, max_players=6 }
+	sewers[i].expedition = { name="Sewers of Dranik", min_players=1, max_players=6 }
 	sewers[i].compass    = { zone="dranik", x=-153.43, y=-1254.68, z=-243.39 }
 	sewers[i].safereturn = { zone="dranik", x=-133.375, y=-1239.125, z=-237.875, h=0.0 }
 end

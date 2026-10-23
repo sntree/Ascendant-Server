@@ -5632,6 +5632,10 @@ void Mob::SetTarget(Mob *mob)
 		GetOwner()->CastToClient()->UpdateXTargetType(MyPetTarget, mob);
 	}
 
+	if (IsMerc() && GetOwner() && GetOwner()->IsClient()) {
+		GetOwner()->CastToClient()->UpdateXTargetType(MyMercenaryTarget, mob);
+	}
+
 	if (IsClient() && GetTarget()) {
 		GetTarget()->SendHPUpdate(true);
 	}

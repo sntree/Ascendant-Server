@@ -212,7 +212,10 @@ const char *LuaEvents[_LargestEventID] = {
 	"event_charm_end",
 	"event_idle_on",
 	"event_idle_off",
-	"event_achievement_complete"
+	"event_achievement_complete",
+	"event_persona_create",
+	"event_persona_switch",
+	"event_persona_switched"
 };
 
 extern Zone *zone;
@@ -386,6 +389,9 @@ LuaParser::LuaParser() {
 	PlayerArgumentDispatch[EVENT_CONNECT]                    = handle_player_connect;
 	PlayerArgumentDispatch[EVENT_PET_COMMAND]                = handle_player_pet_command;
 	PlayerArgumentDispatch[EVENT_ACHIEVEMENT_COMPLETE]       = handle_player_achievement_complete;
+	PlayerArgumentDispatch[EVENT_PERSONA_CREATE]             = handle_player_persona_create;
+	PlayerArgumentDispatch[EVENT_PERSONA_SWITCH]             = handle_player_persona_switch;
+	PlayerArgumentDispatch[EVENT_PERSONA_SWITCHED]           = handle_player_persona_switch;
 
 	ItemArgumentDispatch[EVENT_ITEM_CLICK]      = handle_item_click;
 	ItemArgumentDispatch[EVENT_ITEM_CLICK_CAST] = handle_item_click;

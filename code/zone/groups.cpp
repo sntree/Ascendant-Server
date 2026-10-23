@@ -1076,9 +1076,18 @@ void Group::SendUpdate(uint32 type, Mob* member)
 			break;
 		}
 
-	for (uint32 i = 0; i < MAX_GROUP_MEMBERS; ++i)
-		if (members[i] != nullptr && members[i] != member)
+	for (uint32 i = 0; i < MAX_GROUP_MEMBERS; ++i) {
+		if (members[i] != nullptr && members[i] != member) {
+			if (members[i]->IsMerc()) {
+				Client* merc_owner = members[i]->CastToMerc()->GetMercenaryOwner();
+				if (merc_owner) {
+					strn0cpy(gu->member_merc_owner[x], merc_owner->GetCleanName(), sizeof(gu->member_merc_owner[x]));
+				}
+			}
+
 			strcpy(gu->membername[x++], members[i]->GetCleanName());
+		}
+	}
 
 	member->CastToClient()->QueuePacket(outapp);
 

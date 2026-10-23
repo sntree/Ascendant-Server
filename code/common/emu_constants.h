@@ -201,6 +201,10 @@ namespace EQ
 		const int16 CORPSE_BEGIN = invslot::slotGeneral1;
 		const int16 CORPSE_END   = CORPSE_BEGIN + invslot::slotCursor;
 
+		// saved rows for the cursor queue behind the cursor item (which is saved at slotCursor)
+		const int16 CURSOR_QUEUE_BEGIN = 15000;
+		const int16 CURSOR_QUEUE_END   = 19999;
+
 		// TOB+ only: positions for Item Overflow window item packets, not inventory slots
 		const int16 OVERFLOW_BEGIN = 20000;
 		const int16 OVERFLOW_END   = 20999;
@@ -232,6 +236,33 @@ namespace EQ
 
 		constexpr bool IsDragonHoardSlot(int32 slot_id) { return slot_id >= DRAGON_HOARD_BEGIN && slot_id <= DRAGON_HOARD_END; }
 		constexpr int16 DragonHoardSlot(int index) { return static_cast<int16>(DRAGON_HOARD_BEGIN + index); }
+
+		// TOB+ only: the Inventory window's Merc tab (inventory type 25), slots 0..3. Kept per character in the
+		// inventory table; the character's active mercenary uses the gear.
+		const int16 MERC_EQUIPMENT_BEGIN = 21000;
+		const int16 MERC_EQUIPMENT_COUNT = 4;
+		const int16 MERC_EQUIPMENT_END   = MERC_EQUIPMENT_BEGIN + MERC_EQUIPMENT_COUNT - 1;
+
+		// Item Classes bit the client requires for merc gear (the mercenary class bit, value 65536)
+		const uint32 MERC_EQUIPMENT_CLASS_MASK = 1u << 16;
+
+		// worn slot an item must fit for each merc slot: ear, neck, shoulders, waist
+		inline constexpr int16 MERC_EQUIPMENT_WORN_SLOTS[MERC_EQUIPMENT_COUNT] = { slotEar1, slotNeck, slotShoulders, slotWaist };
+
+		constexpr bool IsMercEquipmentSlot(int32 slot_id) { return slot_id >= MERC_EQUIPMENT_BEGIN && slot_id <= MERC_EQUIPMENT_END; }
+		constexpr int MercEquipmentIndex(int32 slot_id) { return slot_id - MERC_EQUIPMENT_BEGIN; }
+		constexpr int16 MercEquipmentSlot(int index) { return static_cast<int16>(MERC_EQUIPMENT_BEGIN + index); }
+
+		// TOB+ only: the Equipment key ring (Live's seventh ring), index i is slot EQUIPMENT_KEYRING_BEGIN + i.
+		// The client sends EQUIPMENT_KEYRING_APPEND when it drops an item on the tab (index -1).
+		const int16 EQUIPMENT_KEYRING_BEGIN  = 30000;
+		const int16 EQUIPMENT_KEYRING_SIZE   = 1000;
+		const int16 EQUIPMENT_KEYRING_END    = EQUIPMENT_KEYRING_BEGIN + EQUIPMENT_KEYRING_SIZE - 1;
+		const int16 EQUIPMENT_KEYRING_APPEND = EQUIPMENT_KEYRING_END + 1;
+
+		constexpr bool IsEquipmentKeyRingSlot(int32 slot_id) { return slot_id >= EQUIPMENT_KEYRING_BEGIN && slot_id <= EQUIPMENT_KEYRING_END; }
+		constexpr bool IsEquipmentKeyRingRange(int32 slot_id) { return slot_id >= EQUIPMENT_KEYRING_BEGIN && slot_id <= EQUIPMENT_KEYRING_APPEND; }
+		constexpr int16 EquipmentKeyRingSlot(int index) { return static_cast<int16>(EQUIPMENT_KEYRING_BEGIN + index); }
 
 		using RoF2::invslot::EQUIPMENT_BITMASK;
 		using RoF2::invslot::GENERAL_BITMASK;

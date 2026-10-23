@@ -51,6 +51,7 @@
 #include "zone/dialogue_window.h"
 #include "zone/dynamic_zone.h"
 #include "zone/expedition_request.h"
+#include "zone/fellowship_manager.h"
 #include "zone/guild_mgr.h"
 #include "zone/lua_parser.h"
 #include "zone/mob_movement_manager.h"
@@ -711,6 +712,9 @@ Client::~Client() {
 	DataBucket::DeleteCachedBuckets(DataBucketLoadType::Account, AccountID());
 	DataBucket::DeleteCachedBuckets(DataBucketLoadType::Client, CharacterID());
 
+	// TOB+ fellowships: a pending invite does not outlive the client
+	ZoneFellowshipManager::Instance()->ClearInvite(CharacterID());
+
 	if (RuleB(Bots, Enabled)) {
 		Bot::ProcessBotOwnerRefDelete(this);
 	}
@@ -1370,6 +1374,19 @@ void Client::ChannelMessageReceived(uint8 chan_num, uint8 language, uint8 lang_s
 		} else if (!guild_mgr.CheckPermission(GuildID(), GuildRank(), GUILD_ACTION_GUILD_CHAT_SPEAK_IN)) {
 			MessageString(Chat::EchoGuild, NO_PROPER_ACCESS);
 		} else if (!worldserver.SendChannelMessage(this, targetname, chan_num, GuildID(), language, lang_skill, message)) {
+			Message(Chat::White, "Error: World server disconnected");
+		}
+		break;
+	}
+	case ChatChannel_Fellowship: { /* TOB+ Fellowship Chat */
+		if (!IsFellowshipEnabled()) {
+			LogFellowshipsDetail("Dropping fellowship chat from [{}]: fellowships are not enabled for this client", GetCleanName());
+			break;
+		}
+
+		if (!GetFellowshipID()) {
+			MessageString(Chat::DefaultText, FELLOWSHIP_NOT_MEMBER);
+		} else if (!worldserver.SendChannelMessage(this, targetname, chan_num, GetFellowshipID(), language, lang_skill, message)) {
 			Message(Chat::White, "Error: World server disconnected");
 		}
 		break;
@@ -8028,12 +8045,13 @@ void Client::SendMercPersonalInfo()
 		memset(outapp->pBuffer, 0, packetSize);
 		auto mdus   = (MercenaryDataUpdate_Struct *) outapp->pBuffer;
 
+		const std::vector<int> display_order = GetMercDisplayOrder();
 		mdus->MercStatus = 0;
 		mdus->MercCount  = mercCount;
 
 		// Lambda to populate a single merc entry in the packet
-		int max_slots = std::min(RuleI(Mercs, MaxMercSlots), MAXMERCS);
 		uint32 merc_index = 0;
+		int active_index = -1;
 
 		auto fillMercEntry = [&](int slot) {
 			auto& info = GetMercInfo(slot);
@@ -8070,38 +8088,55 @@ void Client::SendMercPersonalInfo()
 			mdus->MercData[merc_index].MercUnk01         = 0;
 			mdus->MercData[merc_index].TimeLeft          = info.MercTimerRemaining;
 			mdus->MercData[merc_index].MerchantSlot      = merc_index + 1;
-			mdus->MercData[merc_index].MercUnk02         = (slot == GetMercSlot()) ? 1 : 0;
+			// TOB reads this as the active stance's index: it highlights that row and echoes it back as a stance pick
+			const bool sends_stance_index = ClientVersion() >= EQ::versions::ClientVersion::TOB;
+			mdus->MercData[merc_index].MercUnk02         = sends_stance_index ? 0 : ((slot == GetMercSlot()) ? 1 : 0);
 			mdus->MercData[merc_index].StanceCount       = stancecount;
 			mdus->MercData[merc_index].MercUnk03         = 0;
-			mdus->MercData[merc_index].MercUnk04         = 1;
+			// TOB draws the Auto Assist checkbox from this byte after every list update; zone-in can precede the merc spawn
+			mdus->MercData[merc_index].MercUnk04         = sends_stance_index ? (GetBucket(MercAutoAssistBucket) != "0" ? 1 : 0) : 1;
 
 			strn0cpy(mdus->MercData[merc_index].MercName, info.merc_name, sizeof(mdus->MercData[merc_index].MercName));
 
 			uint32 stanceindex = 0;
+			uint32 default_stance_index = 0;
+			bool stance_matched = false;
+			const uint8 default_stance = Merc::GetDefaultStance(mercData->MercTemplateID);
 			if (stance_it != zone->merc_stance_list.end()) {
 				for (const auto& stance : stance_it->second) {
 					mdus->MercData[merc_index].Stances[stanceindex].StanceIndex = stanceindex;
 					mdus->MercData[merc_index].Stances[stanceindex].Stance      = stance.StanceID;
+					if (sends_stance_index && stance.StanceID == info.Stance) {
+						mdus->MercData[merc_index].MercUnk02 = stanceindex;
+						stance_matched = true;
+					}
+					if (stance.StanceID == default_stance && default_stance_index == 0) {
+						default_stance_index = stanceindex;
+					}
 					stanceindex++;
 				}
+			}
+
+			// A stance the template does not offer highlights the default row instead of the first one
+			if (sends_stance_index && !stance_matched) {
+				mdus->MercData[merc_index].MercUnk02 = default_stance_index;
+			}
+
+			if (slot == GetMercSlot()) {
+				active_index = static_cast<int>(merc_index);
 			}
 
 			mdus->MercData[merc_index].MercUnk05 = std::min(RuleI(Mercs, MaxMercSlots), MAXMERCS);
 			merc_index++;
 		};
 
-		// Emit the active merc slot first — the client marks the first entry
-		// in the list with the X (active marker), so order matters.
-		if (GetMercSlot() < max_slots && GetMercInfo().mercid != 0) {
-			fillMercEntry(GetMercSlot());
+		for (int slot : display_order) {
+			fillMercEntry(slot);
 		}
 
-		// Then emit remaining owned mercs in slot order
-		for (int slot = 0; slot < max_slots; slot++) {
-			if (slot == GetMercSlot()) {
-				continue; // already emitted
-			}
-			fillMercEntry(slot);
+		// TOB marks the active merc by its index in the list as sent; older clients mark the first entry
+		if (active_index >= 0 && ClientVersion() >= EQ::versions::ClientVersion::TOB) {
+			mdus->MercStatus = active_index;
 		}
 
 		// Update count in case we skipped any invalid entries
@@ -11728,8 +11763,7 @@ void Client::SummonBaggedItems(uint32 bag_item_id, const std::vector<LootItem>& 
 		}
 	}
 
-	PushItemOnCursor(*summoned_bag);
-	SendItemPacket(EQ::invslot::slotCursor, summoned_bag, ItemPacketLimbo);
+	PushItemOnCursor(*summoned_bag, true);
 	safe_delete(summoned_bag);
 }
 

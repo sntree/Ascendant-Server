@@ -1411,7 +1411,7 @@ void Client::SetPEQZoneFlag(uint32 zone_id) {
 	}
 }
 
-bool Client::CanEnterZone(const std::string& zone_short_name, int16 instance_version) {
+bool Client::CanEnterZone(const std::string& zone_short_name, int16 instance_version, uint8 level) {
 	//check some critial rules to see if this char needs to be booted from the zone
 	//only enforce rules here which are serious enough to warrant being kicked from
 	//the zone
@@ -1429,21 +1429,24 @@ bool Client::CanEnterZone(const std::string& zone_short_name, int16 instance_ver
 		return false;
 	}
 
-	if (!GetGM() && GetLevel() < z->min_level) {
+	// 0 means the character's own level; a persona switch checks the level it is about to take
+	const uint8 check_level = level ? level : GetLevel();
+
+	if (!GetGM() && check_level < z->min_level) {
 		LogInfo(
 			"Character [{}] does not meet minimum level requirement ([{}] < [{}])!",
 			GetCleanName(),
-			GetLevel(),
+			check_level,
 			z->min_level
 		);
 		return false;
 	}
 
-	if (!GetGM() && GetLevel() > z->max_level) {
+	if (!GetGM() && check_level > z->max_level) {
 		LogInfo(
 			"Character [{}] does not meet maximum level requirement ([{}] > [{}])!",
 			GetCleanName(),
-			GetLevel(),
+			check_level,
 			z->max_level
 		);
 		return false;

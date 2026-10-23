@@ -137,10 +137,14 @@
 	void Handle_OP_Emote(const EQApplicationPacket *app);
 	void Handle_OP_EndLootRequest(const EQApplicationPacket *app);
 	void Handle_OP_EnvDamage(const EQApplicationPacket *app);
+	void Handle_OP_EquipmentKeyRingOption(const EQApplicationPacket *app);
+	void Handle_OP_EquipmentSetAction(const EQApplicationPacket *app);
 	void Handle_OP_EvolveItem(const EQApplicationPacket *app);
 	void Handle_OP_FaceChange(const EQApplicationPacket *app);
 	void Handle_OP_FactionList(const EQApplicationPacket *app);
 	void Handle_OP_FeignDeath(const EQApplicationPacket *app);
+	void Handle_OP_FellowshipAction(const EQApplicationPacket *app);
+	void Handle_OP_FellowshipCampfireListRequest(const EQApplicationPacket *app);
 	void Handle_OP_FindPersonRequest(const EQApplicationPacket *app);
 	void Handle_OP_FindZoneConnectionsRequest(const EQApplicationPacket *app);
 	void Handle_OP_Fishing(const EQApplicationPacket *app);
@@ -258,6 +262,8 @@
 	void Handle_OP_MercenarySuspendRequest(const EQApplicationPacket *app);
 	void Handle_OP_MercenarySwitch(const EQApplicationPacket *app);
 	void Handle_OP_MercenaryTimerRequest(const EQApplicationPacket *app);
+	void Handle_OP_MercenaryAssist(const EQApplicationPacket *app);
+	void Handle_OP_MercenaryAssistToggle(const EQApplicationPacket *app);
 	void Handle_OP_MoveCoin(const EQApplicationPacket *app);
 	void Handle_OP_MoveItem(const EQApplicationPacket *app);
 	void Handle_OP_MoveMultipleItems(const EQApplicationPacket *app);
@@ -266,6 +272,8 @@
 	void Handle_OP_OpenInventory(const EQApplicationPacket *app);
 	void Handle_OP_OpenTributeMaster(const EQApplicationPacket *app);
 	void Handle_OP_PDeletePetition(const EQApplicationPacket *app);
+	void Handle_OP_PersonaCreate(const EQApplicationPacket *app);
+	void Handle_OP_PersonaSwitch(const EQApplicationPacket *app);
 	void Handle_OP_PetCommands(const EQApplicationPacket *app);
 	void Handle_OP_Petition(const EQApplicationPacket *app);
 	void Handle_OP_PetitionBug(const EQApplicationPacket *app);

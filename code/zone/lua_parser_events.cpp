@@ -1891,6 +1891,37 @@ void handle_player_achievement_complete(
 	lua_setfield(L, -2, "achievement_id");
 }
 
+void handle_player_persona_create(
+	QuestInterface *parse,
+	lua_State* L,
+	Client* client,
+	std::string data,
+	uint32 extra_data,
+	std::vector<std::any> *extra_pointers
+)
+{
+	lua_pushinteger(L, Strings::ToUnsignedInt(data));
+	lua_setfield(L, -2, "persona_class");
+}
+
+void handle_player_persona_switch(
+	QuestInterface *parse,
+	lua_State* L,
+	Client* client,
+	std::string data,
+	uint32 extra_data,
+	std::vector<std::any> *extra_pointers
+)
+{
+	Seperator sep(data.c_str());
+
+	lua_pushinteger(L, Strings::ToUnsignedInt(sep.arg[0]));
+	lua_setfield(L, -2, "old_class");
+
+	lua_pushinteger(L, Strings::ToUnsignedInt(sep.arg[1]));
+	lua_setfield(L, -2, "new_class");
+}
+
 // Item
 void handle_item_click(
 	QuestInterface *parse,

@@ -7019,7 +7019,10 @@ luabind::scope lua_register_events() {
 			luabind::value("charm_end", static_cast<int>(EVENT_CHARM_END)),
 			luabind::value("idle_on", static_cast<int>(EVENT_IDLE_ON)),
 			luabind::value("idle_off", static_cast<int>(EVENT_IDLE_OFF)),
-			luabind::value("achievement_complete", static_cast<int>(EVENT_ACHIEVEMENT_COMPLETE))
+			luabind::value("achievement_complete", static_cast<int>(EVENT_ACHIEVEMENT_COMPLETE)),
+			luabind::value("persona_create", static_cast<int>(EVENT_PERSONA_CREATE)),
+			luabind::value("persona_switch", static_cast<int>(EVENT_PERSONA_SWITCH)),
+			luabind::value("persona_switched", static_cast<int>(EVENT_PERSONA_SWITCHED))
 		)];
 }
 

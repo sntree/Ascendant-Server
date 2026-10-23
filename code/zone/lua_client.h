@@ -564,6 +564,9 @@ public:
 	bool RemoveMarketplaceCoins(uint32 amount, std::string note);
 	bool SetMarketplaceCoins(uint32 amount);
 	bool SetMarketplaceCoins(uint32 amount, std::string note);
+	luabind::object GetPersonaClasses(lua_State* L);
+	uint8 GetPersonaLevel(uint32 class_id);
+	bool HasPersona(uint32 class_id);
 	bool AddTradeskillDepotItem(uint32 item_id, uint32 quantity);
 	uint32 GetTradeskillDepotQuantity(uint32 item_id);
 	bool RemoveTradeskillDepotItem(uint32 item_id, uint32 quantity);

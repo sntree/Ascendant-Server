@@ -34,6 +34,7 @@
 #include "common/misc.h"
 #include "common/opcodemgr.h"
 #include "common/packet_dump.h"
+#include "common/persona.h"
 #include "common/races.h"
 #include "common/random.h"
 #include "common/repositories/account_repository.h"
@@ -48,6 +49,7 @@
 #include "common/strings.h"
 #include "common/zone_store.h"
 #include "world/clientlist.h"
+#include "world/fellowship_manager.h"
 #include "world/login_server_list.h"
 #include "world/login_server.h"
 #include "world/wguild_mgr.h"
@@ -57,6 +59,7 @@
 #include "world/zoneserver.h"
 
 #include "zlib.h"
+#include <algorithm>
 #include <climits>
 #include <cstdio>
 #include <cstdlib>
@@ -260,6 +263,8 @@ void Client::SendMaxCharCreate() {
 	mc->max_chars = EQ::constants::StaticLookup(m_ClientVersion)->CharacterCreationLimit;
 	if (mc->max_chars > EQ::constants::CHARACTER_CREATION_LIMIT)
 		mc->max_chars = EQ::constants::CHARACTER_CREATION_LIMIT;
+
+	mc->persona_slots = std::max(RuleI(Character, PersonaSlots), 0);
 
 	QueuePacket(outapp);
 	safe_delete(outapp);
@@ -786,6 +791,206 @@ bool Client::HandleCharacterCreatePacket(const EQApplicationPacket *app) {
 	return true;
 }
 
+bool Client::HandlePersonaCharCreatePacket(const EQApplicationPacket *app) {
+	if (GetAccountID() == 0) {
+		LogPersonas("Account ID not set; unable to create persona");
+		return false;
+	}
+
+	if (GetClientVersion() < EQ::versions::ClientVersion::TOB || RuleI(Character, PersonaSlots) <= 0) {
+		LogPersonas("Account [{}] sent a persona create but personas are not available to it", GetAccountID());
+		return true;
+	}
+
+	if (app->size != sizeof(PersonaCharCreate_Struct)) {
+		LogPersonas(
+			"Wrong size on persona create. Got: [{}], Expected: [{}]",
+			app->size,
+			sizeof(PersonaCharCreate_Struct)
+		);
+		return true;
+	}
+
+	auto request = (PersonaCharCreate_Struct *) app->pBuffer;
+
+	char name[sizeof(request->name)];
+	strn0cpy(name, request->name, sizeof(name));
+
+	const auto &l = CharacterDataRepository::GetWhere(
+		database,
+		fmt::format(
+			"`account_id` = {} AND `name` = '{}' AND `deleted_at` IS NULL LIMIT 1",
+			GetAccountID(),
+			Strings::Escape(name)
+		)
+	);
+
+	if (l.empty()) {
+		LogPersonas("Account [{}] has no character named [{}] to add a persona to", GetAccountID(), name);
+		SendCharInfo();
+		return true;
+	}
+
+	const auto &e = l.front();
+
+	if (request->character_id && request->character_id != e.id) {
+		LogPersonas(
+			"Persona create for [{}] sent character id [{}] but the character is [{}]",
+			name,
+			request->character_id,
+			e.id
+		);
+		SendCharInfo();
+		return true;
+	}
+
+	CharCreate_Struct cc = request->create;
+
+	if (cc.class_ < Class::Warrior || cc.class_ > Class::Berserker) {
+		LogPersonas("Persona create for [{}] asked for invalid class [{}]", name, cc.class_);
+		SendCharInfo();
+		return true;
+	}
+
+	const auto owned = Persona::LoadClassLevels(database, e.id, e.class_, e.level);
+	if (owned.count(cc.class_)) {
+		LogPersonas("Persona create for [{}] asked for class [{}] which is already owned", name, cc.class_);
+		SendCharInfo();
+		return true;
+	}
+
+	if (Persona::GetAlternateCount(owned) >= static_cast<uint32>(RuleI(Character, PersonaSlots))) {
+		LogPersonas("Persona create for [{}] refused, no free persona slot", name);
+		SendCharInfo();
+		return true;
+	}
+
+	if (!CheckCharCreateInfoSoF(&cc)) {
+		LogPersonas("Persona create for [{}] did not validate (bad race/class/deity/start zone/stats)", name);
+		SendCharInfo();
+		return true;
+	}
+
+	PlayerProfile_Struct pp;
+	memset(&pp, 0, sizeof(PlayerProfile_Struct));
+
+	pp.race             = cc.race;
+	pp.class_           = cc.class_;
+	pp.gender           = cc.gender;
+	pp.deity            = cc.deity;
+	pp.STR              = cc.STR;
+	pp.STA              = cc.STA;
+	pp.AGI              = cc.AGI;
+	pp.DEX              = cc.DEX;
+	pp.WIS              = cc.WIS;
+	pp.INT              = cc.INT;
+	pp.CHA              = cc.CHA;
+	pp.face             = cc.face;
+	pp.eyecolor1        = cc.eyecolor1;
+	pp.eyecolor2        = cc.eyecolor2;
+	pp.hairstyle        = cc.hairstyle;
+	pp.haircolor        = cc.haircolor;
+	pp.beard            = cc.beard;
+	pp.beardcolor       = cc.beardcolor;
+	pp.drakkin_heritage = cc.drakkin_heritage;
+	pp.drakkin_tattoo   = cc.drakkin_tattoo;
+	pp.drakkin_details  = cc.drakkin_details;
+
+	pp.skills[EQ::skills::SkillSwimming]     = RuleI(Skills, SwimmingStartValue);
+	pp.skills[EQ::skills::SkillSenseHeading] = RuleI(Skills, SenseHeadingStartValue);
+
+	// languages are shared with the character, so they are not set here
+	SetRaceStartingSkills(&pp);
+	SetClassStartingSkills(&pp);
+
+	if (RuleI(World, SoFStartZoneID) > 0) {
+		pp.zone_id    = RuleI(World, SoFStartZoneID);
+		cc.start_zone = pp.zone_id;
+	}
+
+	if (!content_db.GetStartZone(&pp, &cc, false)) {
+		LogPersonas("Persona create for [{}] has no valid start zone [{}]", name, cc.start_zone);
+		SendCharInfo();
+		return true;
+	}
+
+	if (!pp.zone_id) {
+		pp.zone_id = Zones::QEYNOS;
+
+		pp.x = pp.y = pp.z = -1;
+	}
+
+	for (uint8 slot_id = 1; slot_id < 5; slot_id++) {
+		pp.binds[slot_id].zone_id = pp.zone_id;
+		pp.binds[slot_id].x       = pp.x;
+		pp.binds[slot_id].y       = pp.y;
+		pp.binds[slot_id].z       = pp.z;
+		pp.binds[slot_id].heading = pp.heading;
+	}
+
+	if (RuleB(World, StartZoneSameAsBindOnCreation)) {
+		pp.binds[0].zone_id = pp.zone_id;
+		pp.binds[0].x       = pp.x;
+		pp.binds[0].y       = pp.y;
+		pp.binds[0].z       = pp.z;
+		pp.binds[0].heading = pp.heading;
+	}
+
+	Persona::NewPersona persona{};
+	persona.class_id         = pp.class_;
+	persona.race             = pp.race;
+	persona.deity            = pp.deity;
+	persona.gender           = pp.gender;
+	persona.face             = pp.face;
+	persona.hair_color       = pp.haircolor;
+	persona.hair_style       = pp.hairstyle;
+	persona.beard            = pp.beard;
+	persona.beard_color      = pp.beardcolor;
+	persona.eye_color_1      = pp.eyecolor1;
+	persona.eye_color_2      = pp.eyecolor2;
+	persona.drakkin_heritage = pp.drakkin_heritage;
+	persona.drakkin_tattoo   = pp.drakkin_tattoo;
+	persona.drakkin_details  = pp.drakkin_details;
+	persona.str              = pp.STR;
+	persona.sta              = pp.STA;
+	persona.cha              = pp.CHA;
+	persona.dex              = pp.DEX;
+	persona.int_             = pp.INT;
+	persona.agi              = pp.AGI;
+	persona.wis              = pp.WIS;
+
+	persona.skills.reserve(MAX_PP_SKILL);
+	for (uint16 skill_id = 0; skill_id < MAX_PP_SKILL; skill_id++) {
+		persona.skills.emplace_back(skill_id, static_cast<uint16>(pp.skills[skill_id]));
+	}
+
+	const uint32 bind_count = static_cast<uint32>(std::size(pp.binds));
+	persona.binds.reserve(bind_count);
+	for (uint32 slot_id = 0; slot_id < bind_count; slot_id++) {
+		persona.binds.push_back(
+			Persona::Bind{
+				.slot        = slot_id,
+				.zone_id     = pp.binds[slot_id].zone_id,
+				.instance_id = pp.binds[slot_id].instance_id,
+				.x           = pp.binds[slot_id].x,
+				.y           = pp.binds[slot_id].y,
+				.z           = pp.binds[slot_id].z,
+				.heading     = pp.binds[slot_id].heading
+			}
+		);
+	}
+
+	if (!Persona::Create(database, e.id, persona)) {
+		LogPersonas("Persona create for [{}] class [{}] failed", name, cc.class_);
+		SendCharInfo();
+		return true;
+	}
+
+	LogPersonas("Character [{}] added persona: class [{}] was [{}]", name, cc.class_, e.class_);
+	SendCharInfo();
+	return true;
+}
+
 bool Client::HandleEnterWorldPacket(const EQApplicationPacket *app) {
 	auto account_id = GetAccountID();
 	if (!account_id) {
@@ -1087,6 +1292,7 @@ bool Client::HandleDeleteCharacterPacket(const EQApplicationPacket *app) {
 	uint32 char_acct_id = database.GetAccountIDByChar((char*)app->pBuffer);
 	if(char_acct_id == GetAccountID()) {
 		LogInfo("Delete character: [{}]", (const char*)app->pBuffer);
+		WorldFellowshipManager::Instance()->RemoveCharacter(database.GetCharacterID((const char *) app->pBuffer));
 		database.DeleteCharacter((char *)app->pBuffer);
 		SendCharInfo();
 	}
@@ -1173,6 +1379,10 @@ bool Client::HandlePacket(const EQApplicationPacket *app) {
 		case OP_CharacterCreate: //Char create
 		{
 			return HandleCharacterCreatePacket(app);
+		}
+		case OP_PersonaCharCreate:
+		{
+			return HandlePersonaCharCreatePacket(app);
 		}
 		case OP_EnterWorld: // Enter world
 		{

@@ -19,6 +19,7 @@ my %polymorph_size_overrides = (
 
 # Forward declaration
 sub ApplyAscendantAuras;
+sub ApplyAscendantAurasToMerc;
 
 # Known safe Guild Lobby (Zone 146) spawns
 my @lobby_locs = (
@@ -32,6 +33,7 @@ my @lobby_locs = (
 sub EVENT_ENTERZONE { #message only appears in Cities / Pok and wherever the Wayfarer Camps (LDON) is in.  This message won't appear in the player's home city.
   # Auto-reapply Ascendant Auras on zone
   ApplyAscendantAuras();
+  quest::settimer("merc_auras", 15); # mercs spawn a few seconds after the owner zones in
 
   # Auto-unlock trainable class skills without touching existing skill values
   plugin::AutoSkills_Process($client);
@@ -210,6 +212,13 @@ sub EVENT_CONNECT {
 
 
 sub EVENT_TIMER {
+
+    # Ascendant Auras on the player's merc once it has spawned after zone-in
+    if ($timer eq "merc_auras") {
+        quest::stoptimer("merc_auras");
+        ApplyAscendantAurasToMerc();
+        return;
+    }
 
     # Check for pending alt currency grants from MOA granting system
     if ($timer eq "altcur_pending_check") {
@@ -588,6 +597,32 @@ sub ApplyAscendantAuras {
     
     if ($applied > 0) {
         $client->Message(15, "Applied $applied Ascendant Aura(s).");
+    }
+
+    ApplyAscendantAurasToMerc();
+}
+
+# Same server-wide auras on the player's mercenary (mercs aren't pets, so the pet path in global_npc.pl skips them)
+sub ApplyAscendantAurasToMerc {
+    return unless $client;
+    my $merc = $client->GetMerc();
+    return unless $merc;
+
+    my %auras = (
+        ascendant_aura_speed_expires   => 25543,
+        ascendant_aura_healing_expires => 25544,
+        ascendant_aura_thought_expires => 25545,
+        ascendant_aura_haste_expires   => 25546,
+    );
+
+    my $now = time();
+    foreach my $bucket (keys %auras) {
+        my $spell  = $auras{$bucket};
+        my $expire = quest::get_data($bucket);
+        my $remaining = $expire ? $expire - $now : 0;
+        $merc->BuffFadeBySpellID($spell);
+        next if $remaining <= 0;
+        $merc->ApplySpellBuff($spell, int($remaining / 6), 255);
     }
 }
 

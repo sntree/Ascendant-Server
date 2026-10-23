@@ -42,6 +42,7 @@
 #include "zone/dialogue_window.h"
 #include "zone/dynamic_zone.h"
 #include "zone/event_codes.h"
+#include "zone/fellowship_manager.h"
 #include "zone/gm_commands/door_manipulation.h"
 #include "zone/gm_commands/object_manipulation.h"
 #include "zone/guild_mgr.h"
@@ -272,10 +273,14 @@ void MapOpcodes()
 	ConnectedOpcodes[OP_Emote] = &Client::Handle_OP_Emote;
 	ConnectedOpcodes[OP_EndLootRequest] = &Client::Handle_OP_EndLootRequest;
 	ConnectedOpcodes[OP_EnvDamage] = &Client::Handle_OP_EnvDamage;
+	ConnectedOpcodes[OP_EquipmentKeyRingOption] = &Client::Handle_OP_EquipmentKeyRingOption;
+	ConnectedOpcodes[OP_EquipmentSetAction] = &Client::Handle_OP_EquipmentSetAction;
 	ConnectedOpcodes[OP_EvolveItem] = &Client::Handle_OP_EvolveItem;
 	ConnectedOpcodes[OP_FaceChange] = &Client::Handle_OP_FaceChange;
 	ConnectedOpcodes[OP_FactionList] = &Client::Handle_OP_FactionList;
 	ConnectedOpcodes[OP_FeignDeath] = &Client::Handle_OP_FeignDeath;
+	ConnectedOpcodes[OP_FellowshipAction] = &Client::Handle_OP_FellowshipAction;
+	ConnectedOpcodes[OP_FellowshipCampfireListRequest] = &Client::Handle_OP_FellowshipCampfireListRequest;
 	ConnectedOpcodes[OP_FindPersonRequest] = &Client::Handle_OP_FindPersonRequest;
 	ConnectedOpcodes[OP_FindZoneConnectionsRequest] = &Client::Handle_OP_FindZoneConnectionsRequest;
 	ConnectedOpcodes[OP_FindLocationListRequest] = &Client::Handle_OP_FindZoneConnectionsRequest;
@@ -394,6 +399,8 @@ void MapOpcodes()
 	ConnectedOpcodes[OP_MercenarySuspendRequest] = &Client::Handle_OP_MercenarySuspendRequest;
 	ConnectedOpcodes[OP_MercenarySwitch] = &Client::Handle_OP_MercenarySwitch;
 	ConnectedOpcodes[OP_MercenaryTimerRequest] = &Client::Handle_OP_MercenaryTimerRequest;
+	ConnectedOpcodes[OP_MercenaryAssist] = &Client::Handle_OP_MercenaryAssist;
+	ConnectedOpcodes[OP_MercenaryAssistToggle] = &Client::Handle_OP_MercenaryAssistToggle;
 	ConnectedOpcodes[OP_MoveCoin] = &Client::Handle_OP_MoveCoin;
 	ConnectedOpcodes[OP_MoveItem] = &Client::Handle_OP_MoveItem;
 	ConnectedOpcodes[OP_MoveMultipleItems] = &Client::Handle_OP_MoveMultipleItems;
@@ -404,6 +411,8 @@ void MapOpcodes()
 	ConnectedOpcodes[OP_ShopSendParcel] = &Client::Handle_OP_ShopSendParcel;
 	ConnectedOpcodes[OP_ShopRetrieveParcel] = &Client::Handle_OP_ShopRetrieveParcel;
 	ConnectedOpcodes[OP_PDeletePetition] = &Client::Handle_OP_PDeletePetition;
+	ConnectedOpcodes[OP_PersonaCreate] = &Client::Handle_OP_PersonaCreate;
+	ConnectedOpcodes[OP_PersonaSwitch] = &Client::Handle_OP_PersonaSwitch;
 	ConnectedOpcodes[OP_PetCommands] = &Client::Handle_OP_PetCommands;
 	ConnectedOpcodes[OP_Petition] = &Client::Handle_OP_Petition;
 	ConnectedOpcodes[OP_PetitionBug] = &Client::Handle_OP_PetitionBug;
@@ -608,6 +617,111 @@ int Client::HandlePacket(const EQApplicationPacket *app)
 	return(true);
 }
 
+// Applies the effects of the buffs just loaded into the buff array (illusions, mounts, procs, ...)
+void Client::ReapplyLoadedBuffs()
+{
+	uint32 buff_count = GetMaxTotalSlots();
+	for (uint32 j1 = 0; j1 < buff_count; j1++) {
+		if (!IsValidSpell(buffs[j1].spellid))
+			continue;
+
+		const SPDat_Spell_Struct &spell = spells[buffs[j1].spellid];
+
+		int NimbusEffect = GetSpellNimbusEffect(buffs[j1].spellid);
+		if (NimbusEffect) {
+			if (!IsNimbusEffectActive(NimbusEffect))
+				SendSpellEffect(NimbusEffect, 500, 0, 1, 3000, true);
+		}
+
+		for (int x1 = 0; x1 < EFFECT_COUNT; x1++) {
+			switch (spell.effect_id[x1]) {
+			case SpellEffect::Illusion: {
+				if (GetIllusionBlock()) {
+					break;
+				}
+
+				if (buffs[j1].persistent_buff) {
+					Mob *caster = entity_list.GetMobID(buffs[j1].casterid);
+					ApplySpellEffectIllusion(spell.id, caster, j1, spell.base_value[x1], spell.limit_value[x1], spell.max_value[x1]);
+				}
+				break;
+			}
+			case SpellEffect::SummonHorse: {
+				if (RuleB(Character, PreventMountsFromZoning) || !zone->CanCastOutdoor()) {
+					BuffFadeByEffect(SpellEffect::SummonHorse);
+				} else {
+					SummonHorse(buffs[j1].spellid);
+				}
+				break;
+			}
+			case SpellEffect::Silence:
+			{
+				Silence(true);
+				break;
+			}
+			case SpellEffect::Amnesia:
+			{
+				Amnesia(true);
+				break;
+			}
+			case SpellEffect::DivineAura:
+			{
+				invulnerable = true;
+				break;
+			}
+			case SpellEffect::Invisibility2:
+			case SpellEffect::Invisibility:
+			{
+				SendAppearancePacket(AppearanceType::Invisibility, Invisibility::Invisible);
+				break;
+			}
+			case SpellEffect::Levitate:
+			{
+				if (!zone->CanLevitate()) {
+					if (!GetGM()) {
+						SendAppearancePacket(AppearanceType::FlyMode, 0);
+						BuffFadeByEffect(SpellEffect::Levitate);
+						Message(Chat::Red, "You can't levitate in this zone.");
+						break;
+					}
+
+					Message(Chat::White, "Your GM flag allows you to levitate in this zone.");
+				}
+
+				SendAppearancePacket(
+					AppearanceType::FlyMode,
+					(
+						spell.limit_value[x1] == 1 ?
+							EQ::constants::GravityBehavior::LevitateWhileRunning :
+							EQ::constants::GravityBehavior::Levitating
+					),
+					true,
+					true
+				);
+
+				break;
+			}
+			case SpellEffect::AddMeleeProc:
+			case SpellEffect::WeaponProc:
+			{
+				AddProcToWeapon(GetProcID(buffs[j1].spellid, x1), false, 100 + spells[buffs[j1].spellid].limit_value[x1], buffs[j1].spellid, buffs[j1].casterlevel, GetSpellProcLimitTimer(buffs[j1].spellid, ProcType::MELEE_PROC));
+				break;
+			}
+			case SpellEffect::DefensiveProc:
+			{
+				AddDefensiveProc(GetProcID(buffs[j1].spellid, x1), 100 + spells[buffs[j1].spellid].limit_value[x1], buffs[j1].spellid, GetSpellProcLimitTimer(buffs[j1].spellid, ProcType::DEFENSIVE_PROC));
+				break;
+			}
+			case SpellEffect::RangedProc:
+			{
+				AddRangedProc(GetProcID(buffs[j1].spellid, x1), 100 + spells[buffs[j1].spellid].limit_value[x1], buffs[j1].spellid, GetSpellProcLimitTimer(buffs[j1].spellid, ProcType::RANGED_PROC));
+				break;
+			}
+			}
+		}
+	}
+}
+
 // Finish client connecting state
 void Client::CompleteConnect()
 {
@@ -632,6 +746,11 @@ void Client::CompleteConnect()
 			settings->WriteUInt32(std::max(0, unlock_seconds));
 			QueuePacket(settings);
 			safe_delete(settings);
+		}
+
+		if (IsPersonasEnabled()) {
+			LoadPersonaClasses();
+			SendPersonaClassList();
 		}
 	}
 
@@ -770,106 +889,7 @@ void Client::CompleteConnect()
 	//bulk raid send in here eventually
 
 	//reapply some buffs
-	uint32 buff_count = GetMaxTotalSlots();
-	for (uint32 j1 = 0; j1 < buff_count; j1++) {
-		if (!IsValidSpell(buffs[j1].spellid))
-			continue;
-
-		const SPDat_Spell_Struct &spell = spells[buffs[j1].spellid];
-
-		int NimbusEffect = GetSpellNimbusEffect(buffs[j1].spellid);
-		if (NimbusEffect) {
-			if (!IsNimbusEffectActive(NimbusEffect))
-				SendSpellEffect(NimbusEffect, 500, 0, 1, 3000, true);
-		}
-
-		for (int x1 = 0; x1 < EFFECT_COUNT; x1++) {
-			switch (spell.effect_id[x1]) {
-			case SpellEffect::Illusion: {
-				if (GetIllusionBlock()) {
-					break;
-				}
-
-				if (buffs[j1].persistent_buff) {
-					Mob *caster = entity_list.GetMobID(buffs[j1].casterid);
-					ApplySpellEffectIllusion(spell.id, caster, j1, spell.base_value[x1], spell.limit_value[x1], spell.max_value[x1]);
-				}
-				break;
-			}
-			case SpellEffect::SummonHorse: {
-				if (RuleB(Character, PreventMountsFromZoning) || !zone->CanCastOutdoor()) {
-					BuffFadeByEffect(SpellEffect::SummonHorse);
-				} else {
-					SummonHorse(buffs[j1].spellid);
-				}
-				break;
-			}
-			case SpellEffect::Silence:
-			{
-				Silence(true);
-				break;
-			}
-			case SpellEffect::Amnesia:
-			{
-				Amnesia(true);
-				break;
-			}
-			case SpellEffect::DivineAura:
-			{
-				invulnerable = true;
-				break;
-			}
-			case SpellEffect::Invisibility2:
-			case SpellEffect::Invisibility:
-			{
-				SendAppearancePacket(AppearanceType::Invisibility, Invisibility::Invisible);
-				break;
-			}
-			case SpellEffect::Levitate:
-			{
-				if (!zone->CanLevitate()) {
-					if (!GetGM()) {
-						SendAppearancePacket(AppearanceType::FlyMode, 0);
-						BuffFadeByEffect(SpellEffect::Levitate);
-						Message(Chat::Red, "You can't levitate in this zone.");
-						break;
-					}
-
-					Message(Chat::White, "Your GM flag allows you to levitate in this zone.");
-				}
-
-				SendAppearancePacket(
-					AppearanceType::FlyMode,
-					(
-						spell.limit_value[x1] == 1 ?
-							EQ::constants::GravityBehavior::LevitateWhileRunning :
-							EQ::constants::GravityBehavior::Levitating
-					),
-					true,
-					true
-				);
-
-				break;
-			}
-			case SpellEffect::AddMeleeProc:
-			case SpellEffect::WeaponProc:
-			{
-				AddProcToWeapon(GetProcID(buffs[j1].spellid, x1), false, 100 + spells[buffs[j1].spellid].limit_value[x1], buffs[j1].spellid, buffs[j1].casterlevel, GetSpellProcLimitTimer(buffs[j1].spellid, ProcType::MELEE_PROC));
-				break;
-			}
-			case SpellEffect::DefensiveProc:
-			{
-				AddDefensiveProc(GetProcID(buffs[j1].spellid, x1), 100 + spells[buffs[j1].spellid].limit_value[x1], buffs[j1].spellid, GetSpellProcLimitTimer(buffs[j1].spellid, ProcType::DEFENSIVE_PROC));
-				break;
-			}
-			case SpellEffect::RangedProc:
-			{
-				AddRangedProc(GetProcID(buffs[j1].spellid, x1), 100 + spells[buffs[j1].spellid].limit_value[x1], buffs[j1].spellid, GetSpellProcLimitTimer(buffs[j1].spellid, ProcType::RANGED_PROC));
-				break;
-			}
-			}
-		}
-	}
+	ReapplyLoadedBuffs();
 
 	/* Sends appearances for all mobs not doing Animation::Standing aka sitting, looting, playing dead */
 	entity_list.SendZoneAppearance(this);
@@ -1509,6 +1529,7 @@ void Client::Handle_Connect_OP_WorldObjectsSent(const EQApplicationPacket *app)
 
 	if (RuleB(Mercs, AllowMercs))
 	{
+		SendMercOwnerLinks();
 		SpawnMercOnZone();
 	}
 
@@ -1518,6 +1539,71 @@ void Client::Handle_Connect_OP_WorldObjectsSent(const EQApplicationPacket *app)
 void Client::Handle_Connect_OP_ZoneComplete(const EQApplicationPacket *app)
 {
 	return;
+}
+
+// Spell gems and buffs of the active class, loaded into the buff array and the profile
+void Client::LoadClassState()
+{
+	if (SPDAT_RECORDS > 0) {
+		for (uint32 z = 0; z < EQ::spells::SPELL_GEM_COUNT; z++) {
+			if (m_pp.mem_spells[z] >= (uint32)SPDAT_RECORDS)
+				UnmemSpell(z, false);
+		}
+
+		database.LoadBuffs(this);
+		uint32 max_slots = GetMaxBuffSlots();
+		for (int i = 0; i < BUFF_COUNT; i++) {
+			if (IsValidSpell(buffs[i].spellid)) {
+				m_pp.buffs[i].spellid = buffs[i].spellid;
+				m_pp.buffs[i].bard_modifier = buffs[i].instrument_mod;
+				m_pp.buffs[i].effect_type = 2;
+				m_pp.buffs[i].player_id = 0x2211;
+				m_pp.buffs[i].level = buffs[i].casterlevel;
+				m_pp.buffs[i].unknown003 = 0;
+				m_pp.buffs[i].duration = buffs[i].ticsremaining;
+				m_pp.buffs[i].counters = buffs[i].counters;
+				m_pp.buffs[i].num_hits = buffs[i].hit_number;
+			}
+			else {
+				m_pp.buffs[i].spellid = SPELL_UNKNOWN;
+				m_pp.buffs[i].bard_modifier = 10;
+				m_pp.buffs[i].effect_type = 0;
+				m_pp.buffs[i].player_id = 0;
+				m_pp.buffs[i].level = 0;
+				m_pp.buffs[i].unknown003 = 0;
+				m_pp.buffs[i].duration = 0;
+				m_pp.buffs[i].counters = 0;
+				m_pp.buffs[i].num_hits = 0;
+			}
+		}
+	}
+}
+
+// Persistent timers of the active class and the gem and ability refresh values the profile carries
+void Client::LoadClassTimers()
+{
+	p_timers.SetCharID(CharacterID());
+	if (!p_timers.Load(&database)) {
+		LogError("Unable to load ability timers from the database for [{}] ([{}])!", GetCleanName(), CharacterID());
+	}
+
+	/* Load Spell Slot Refresh from Currently Memoried Spells */
+	for (unsigned int i = 0; i < EQ::spells::SPELL_GEM_COUNT; ++i)
+		if (IsValidSpell(m_pp.mem_spells[i]))
+			m_pp.spellSlotRefresh[i] = p_timers.GetRemainingTime(pTimerSpellStart + m_pp.mem_spells[i]) * 1000;
+
+	/* Ability slot refresh send SK/PAL */
+	if (m_pp.class_ == Class::ShadowKnight || m_pp.class_ == Class::Paladin) {
+		uint32 abilitynum = 0;
+		if (m_pp.class_ == Class::ShadowKnight) { abilitynum = pTimerHarmTouch; }
+		else { abilitynum = pTimerLayHands; }
+
+		uint32 remaining = p_timers.GetRemainingTime(abilitynum);
+		if (remaining > 0 && remaining < 15300)
+			m_pp.abilitySlotRefresh = remaining * 1000;
+		else
+			m_pp.abilitySlotRefresh = 0;
+	}
 }
 
 void Client::Handle_Connect_OP_ZoneEntry(const EQApplicationPacket *app)
@@ -1569,6 +1655,9 @@ void Client::Handle_Connect_OP_ZoneEntry(const EQApplicationPacket *app)
 
 	uint32 cid = CharacterID();
 	character_id = cid; /* Global character_id reference */
+
+	// TOB+ fellowships: from the zone's cache; every use checks IsFellowshipEnabled()
+	m_fellowship_id = ZoneFellowshipManager::Instance()->GetFellowshipIDByCharacterID(cid);
 
 	/* Flush and reload factions */
 	database.RemoveTempFactions(this);
@@ -1817,39 +1906,7 @@ void Client::Handle_Connect_OP_ZoneEntry(const EQApplicationPacket *app)
 		database.botdb.LoadBotSettings(this);
 	}
 
-	if (SPDAT_RECORDS > 0) {
-		for (uint32 z = 0; z < EQ::spells::SPELL_GEM_COUNT; z++) {
-			if (m_pp.mem_spells[z] >= (uint32)SPDAT_RECORDS)
-				UnmemSpell(z, false);
-		}
-
-		database.LoadBuffs(this);
-		uint32 max_slots = GetMaxBuffSlots();
-		for (int i = 0; i < BUFF_COUNT; i++) {
-			if (IsValidSpell(buffs[i].spellid)) {
-				m_pp.buffs[i].spellid = buffs[i].spellid;
-				m_pp.buffs[i].bard_modifier = buffs[i].instrument_mod;
-				m_pp.buffs[i].effect_type = 2;
-				m_pp.buffs[i].player_id = 0x2211;
-				m_pp.buffs[i].level = buffs[i].casterlevel;
-				m_pp.buffs[i].unknown003 = 0;
-				m_pp.buffs[i].duration = buffs[i].ticsremaining;
-				m_pp.buffs[i].counters = buffs[i].counters;
-				m_pp.buffs[i].num_hits = buffs[i].hit_number;
-			}
-			else {
-				m_pp.buffs[i].spellid = SPELL_UNKNOWN;
-				m_pp.buffs[i].bard_modifier = 10;
-				m_pp.buffs[i].effect_type = 0;
-				m_pp.buffs[i].player_id = 0;
-				m_pp.buffs[i].level = 0;
-				m_pp.buffs[i].unknown003 = 0;
-				m_pp.buffs[i].duration = 0;
-				m_pp.buffs[i].counters = 0;
-				m_pp.buffs[i].num_hits = 0;
-			}
-		}
-	}
+	LoadClassState();
 
 	/* Load Character Key Ring */
 	KeyRingLoad();
@@ -1926,6 +1983,12 @@ void Client::Handle_Connect_OP_ZoneEntry(const EQApplicationPacket *app)
 		group->SendLeadershipAAUpdate();
 	}
 
+	// a new persona's first login may still wear the previous class's gear; levels are left alone here, since
+	// deleveling keeps the gear on as it always has
+	if (IsPersonasEnabled()) {
+		UnequipPersonaGear(false);
+	}
+
 	m_inv.SetGMInventory((bool)m_pp.gm); // set to current gm state for calc
 	CalcBonuses();
 	if (RuleB(Zone, EnableLoggedOffReplenishments) &&
@@ -1945,28 +2008,7 @@ void Client::Handle_Connect_OP_ZoneEntry(const EQApplicationPacket *app)
 	/* Update LFP in case any (or all) of our group disbanded while we were zoning. */
 	if (IsLFP()) { UpdateLFP(); }
 
-	p_timers.SetCharID(CharacterID());
-	if (!p_timers.Load(&database)) {
-		LogError("Unable to load ability timers from the database for [{}] ([{}])!", GetCleanName(), CharacterID());
-	}
-
-	/* Load Spell Slot Refresh from Currently Memoried Spells */
-	for (unsigned int i = 0; i < EQ::spells::SPELL_GEM_COUNT; ++i)
-		if (IsValidSpell(m_pp.mem_spells[i]))
-			m_pp.spellSlotRefresh[i] = p_timers.GetRemainingTime(pTimerSpellStart + m_pp.mem_spells[i]) * 1000;
-
-	/* Ability slot refresh send SK/PAL */
-	if (m_pp.class_ == Class::ShadowKnight || m_pp.class_ == Class::Paladin) {
-		uint32 abilitynum = 0;
-		if (m_pp.class_ == Class::ShadowKnight) { abilitynum = pTimerHarmTouch; }
-		else { abilitynum = pTimerLayHands; }
-
-		uint32 remaining = p_timers.GetRemainingTime(abilitynum);
-		if (remaining > 0 && remaining < 15300)
-			m_pp.abilitySlotRefresh = remaining * 1000;
-		else
-			m_pp.abilitySlotRefresh = 0;
-	}
+	LoadClassTimers();
 
 	/* Reset to max so they dont drown on zone in if its underwater */
 	m_pp.air_remaining = 60;
@@ -10333,6 +10375,13 @@ void Client::Handle_OP_ItemVerifyRequest(const EQApplicationPacket *app)
 	}
 
 	spell_id = item->Click.Effect;
+
+	// TOB+ Fellowship Registration Insignia: teleport to the campsite instead of casting
+	if (spell_id == SPELL_FELLOWSHIP_CALLING && IsFellowshipEnabled()) {
+		UseFellowshipInsignia();
+		return;
+	}
+
 	bool is_casting_bard_song = false;
 
 	// TOB+ sends no target for a single target beneficial click when nothing is targeted; older clients send the caster
@@ -11652,7 +11701,13 @@ void Client::Handle_OP_MercenaryHire(const EQApplicationPacket *app)
 
 		if (merc)
 		{
-			SpawnMerc(merc, true);
+			if (!SpawnMerc(merc, true))
+			{
+				// merc was freed by SpawnMerc
+				SendMercMerchantResponsePacket(3);
+				return;
+			}
+
 			merc->Save();
 
 			if (RuleB(Mercs, ChargeMercPurchaseCost))
@@ -11719,37 +11774,9 @@ void Client::Handle_OP_MercenarySwitch(const EQApplicationPacket *app)
 
 	Log(Logs::General, Logs::Mercenaries, "Switch request to UI index %u received from %s.", merc_ui_index, GetName());
 
-	// The client sends a dense UI index (0, 1, 2...) that corresponds to the Nth
-	// owned merc in the list, matching the order sent by SendMercPersonalInfo().
-	// SendMercPersonalInfo emits the active slot first, then remaining slots in order.
-	// We must replicate that same ordering to map UI index -> internal slot.
-	int target_slot = -1;
-	int max_slots = std::min(RuleI(Mercs, MaxMercSlots), MAXMERCS);
-	uint32 ui_pos = 0;
-
-	// First: the active merc slot (emitted first in the packet)
-	if (GetMercSlot() < max_slots && m_mercinfo[GetMercSlot()].mercid != 0) {
-		if (ui_pos == merc_ui_index) {
-			target_slot = GetMercSlot();
-		}
-		ui_pos++;
-	}
-
-	// Then: remaining slots in order (skipping active slot)
-	if (target_slot < 0) {
-		for (int slot = 0; slot < max_slots; slot++) {
-			if (slot == GetMercSlot()) {
-				continue;
-			}
-			if (m_mercinfo[slot].mercid != 0) {
-				if (ui_pos == merc_ui_index) {
-					target_slot = slot;
-					break;
-				}
-				ui_pos++;
-			}
-		}
-	}
+	// The client sends the row index of the list SendMercPersonalInfo() sent
+	const std::vector<int> display_order = GetMercDisplayOrder();
+	int target_slot = merc_ui_index < display_order.size() ? display_order[merc_ui_index] : -1;
 
 	if (target_slot < 0) {
 		Log(Logs::General, Logs::Mercenaries, "Switch request denied — UI index %u has no corresponding merc for %s.", merc_ui_index, GetName());
@@ -11783,6 +11810,29 @@ void Client::Handle_OP_MercenarySwitch(const EQApplicationPacket *app)
 
 	// Unsuspend the target merc
 	SuspendMercCommand();
+
+	// the list order and active marker changed; without this the Manage window keeps the old rows
+	SendMercPersonalInfo();
+}
+
+// TOB+ Call Assist button and /mercassist: the merc attacks the owner's target now
+void Client::Handle_OP_MercenaryAssist(const EQApplicationPacket *app)
+{
+	if (!RuleB(Mercs, AllowMercs)) {
+		return;
+	}
+
+	CallMercAssist();
+}
+
+// TOB+ Auto Assist checkbox and /mercassist on|off: u8 1 = the merc joins when the owner attacks
+void Client::Handle_OP_MercenaryAssistToggle(const EQApplicationPacket *app)
+{
+	if (app->size < sizeof(uint8)) {
+		return;
+	}
+
+	SetMercAutoAssist(app->pBuffer[0] != 0);
 }
 
 void Client::Handle_OP_MercenaryTimerRequest(const EQApplicationPacket *app)
@@ -11822,6 +11872,10 @@ void Client::Handle_OP_MercenaryTimerRequest(const EQApplicationPacket *app)
 
 	if (entityID > 0) {
 		SendMercTimerPacket(entityID, mercState, suspendedTime, GetMercInfo().MercTimerRemaining, RuleI(Mercs, SuspendIntervalMS));
+	}
+	else if (ClientVersion() >= EQ::versions::ClientVersion::TOB && GetMercInfo().mercid && GetMercInfo().IsSuspended) {
+		// ToB only learns about a suspended merc from this reply; it then asks for the merc list
+		SendMercTimerPacket(0, MERC_STATE_SUSPENDED, GetMercInfo().SuspendedTime, GetMercInfo().MercTimerRemaining, RuleI(Mercs, SuspendIntervalMS));
 	}
 }
 
@@ -11898,120 +11952,182 @@ void Client::Handle_OP_MoveItem(const EQApplicationPacket *app)
 void Client::Handle_OP_MoveMultipleItems(const EQApplicationPacket *app)
 {
 	// This packet is only sent from the client if we ctrl click items in inventory
-	if (m_ClientVersionBit & EQ::versions::maskRoF2AndLater) {
-		if (!CharacterID()) {
-			LinkDead();
-			return;
-		}
-
-		if (app->size < sizeof(MultiMoveItem_Struct)) {
-			LinkDead();
-			return; // Not enough data to be a valid packet
-		}
-
-		const MultiMoveItem_Struct* multi_move = reinterpret_cast<const MultiMoveItem_Struct*>(app->pBuffer);
-		if (app->size != sizeof(MultiMoveItem_Struct) + sizeof(MultiMoveItemSub_Struct) * multi_move->count) {
-			LinkDead();
-			return; // Packet size does not match expected size
-		}
-
-		const int16 from_parent = multi_move->moves[0].from_slot.Slot;
-		const int16 to_parent   = multi_move->moves[0].to_slot.Slot;
-
-		// CTRL + left click drops an item into a bag without opening it.
-		// This can be a bag, in which case it tries to fill the target bag with the contents of the bag on the cursor
-		// CTRL + right click swaps the contents of two bags if a bag is on your cursor and you ctrl-right click on another bag.
-
-		// We need to check if this is a swap or just an addition (left click or right click)
-		// Check if any component of this transaction is coming from anywhere other than the cursor
-		bool left_click = true;
-		for (int i = 0; i < multi_move->count; i++) {
-			if (multi_move->moves[i].from_slot.Slot != EQ::invslot::slotCursor) {
-				left_click = false;
-			}
-		}
-
-		// This is a left click which is purely additive. This should always be cursor object or cursor bag contents into general\bank\whatever bag
-		if (left_click) {
-			for (int i = 0; i < multi_move->count; i++) {
-				MoveItem_Struct* mi = new MoveItem_Struct();
-				mi->from_slot 	= multi_move->moves[i].from_slot.SubIndex == -1 ? multi_move->moves[i].from_slot.Slot : m_inv.CalcSlotId(multi_move->moves[i].from_slot.Slot, multi_move->moves[i].from_slot.SubIndex);
-				mi->to_slot = m_inv.CalcSlotId(multi_move->moves[i].to_slot.Slot, multi_move->moves[i].to_slot.SubIndex);
-
-				if (multi_move->moves[i].to_slot.Type == EQ::invtype::typeBank) { // Target is bank inventory
-					mi->to_slot = m_inv.CalcSlotId(multi_move->moves[i].to_slot.Slot + EQ::invslot::BANK_BEGIN, multi_move->moves[i].to_slot.SubIndex);
-				} else if (multi_move->moves[i].to_slot.Type == EQ::invtype::typeSharedBank) { // Target is shared bank inventory
-					mi->to_slot = m_inv.CalcSlotId(multi_move->moves[i].to_slot.Slot + EQ::invslot::SHARED_BANK_BEGIN, multi_move->moves[i].to_slot.SubIndex);
-				}
-
-				// This sends '1' as the stack count for unstackable items, which our titanium-era SwapItem blows up
-				if (m_inv.GetItem(mi->from_slot)->IsStackable()) {
-					mi->number_in_stack = multi_move->moves[i].number_in_stack;
-				} else {
-					mi->number_in_stack = 0;
-				}
-
-				if (!SwapItem(mi) && IsValidSlot(mi->from_slot) && IsValidSlot(mi->to_slot)) {
-					bool error = false;
-					SwapItemResync(mi);
-					InterrogateInventory(this, false, true, false, error, false);
-					if (error) {
-						InterrogateInventory(this, true, false, true, error);
-					}
-				}
-				safe_delete(mi);
-			}
-		// This is the swap.
-		// Client behavior is just to move stacks without combining them
-		// Items get rearranged to fill the 'top' of the bag first
-		} else {
-			struct MoveInfo {
-				EQ::ItemInstance* item;
-				uint16 to_slot;
-			};
-
-			std::vector<MoveInfo> items;
-    		items.reserve(multi_move->count);
-
-			for (int i = 0; i < multi_move->count; i++) {
-				// These are always bags, so we don't need to worry about raw items in slotCursor
-				uint16 from_slot   = m_inv.CalcSlotId(multi_move->moves[i].from_slot.Slot, multi_move->moves[i].from_slot.SubIndex);
-				if (multi_move->moves[i].from_slot.Type == EQ::invtype::typeBank) { // Target is bank inventory
-					from_slot = m_inv.CalcSlotId(multi_move->moves[i].from_slot.Slot + EQ::invslot::BANK_BEGIN, multi_move->moves[i].from_slot.SubIndex);
-				} else if (multi_move->moves[i].from_slot.Type == EQ::invtype::typeSharedBank) { // Target is shared bank inventory
-					from_slot = m_inv.CalcSlotId(multi_move->moves[i].from_slot.Slot + EQ::invslot::SHARED_BANK_BEGIN, multi_move->moves[i].from_slot.SubIndex);
-				}
-
-				uint16 to_slot   = m_inv.CalcSlotId(multi_move->moves[i].to_slot.Slot, multi_move->moves[i].to_slot.SubIndex);
-				if (multi_move->moves[i].to_slot.Type == EQ::invtype::typeBank) { // Target is bank inventory
-					to_slot = m_inv.CalcSlotId(multi_move->moves[i].to_slot.Slot + EQ::invslot::BANK_BEGIN, multi_move->moves[i].to_slot.SubIndex);
-				} else if (multi_move->moves[i].to_slot.Type == EQ::invtype::typeSharedBank) { // Target is shared bank inventory
-					to_slot = m_inv.CalcSlotId(multi_move->moves[i].to_slot.Slot + EQ::invslot::SHARED_BANK_BEGIN, multi_move->moves[i].to_slot.SubIndex);
-				}
-
-				// I wasn't able to produce any error states on purpose.
-				MoveInfo move{
-					.item = m_inv.PopItem(from_slot), // Don't delete the instance here
-					.to_slot = to_slot
-				};
-
-				if (move.item) {
-					items.push_back(move);
-					database.SaveInventory(CharacterID(), NULL, from_slot); // We have to manually save inventory here.
-				} else {
-					LinkDead();
-					return; // Prevent inventory desync here. Forcing a resync would be better, but we don't have a MoveItem struct to work with.
-				}
-			}
-
-			for (const MoveInfo& move : items) {
-				PutItemInInventory(move.to_slot, *move.item); // This saves inventory too
-			}
-		}
-
-	} else {
+	if (!(m_ClientVersionBit & EQ::versions::maskRoF2AndLater)) {
 		LinkDead(); // This packet should not be sent by an older client
 		return;
+	}
+
+	if (!CharacterID()) {
+		LinkDead();
+		return;
+	}
+
+	if (app->size < sizeof(MultiMoveItem_Struct)) {
+		LinkDead();
+		return; // Not enough data to be a valid packet
+	}
+
+	const MultiMoveItem_Struct* multi_move = reinterpret_cast<const MultiMoveItem_Struct*>(app->pBuffer);
+	if (app->size != sizeof(MultiMoveItem_Struct) + sizeof(MultiMoveItemSub_Struct) * static_cast<size_t>(multi_move->count)) {
+		LinkDead();
+		return; // Packet size does not match expected size
+	}
+
+	// server slot for a typed slot, INVALID_INDEX for anything a multi-move can't touch
+	auto to_server_slot = [this](const InventorySlot_Struct& typed) -> int16 {
+		if (typed.SubIndex != INVALID_INDEX && (typed.SubIndex < 0 || typed.SubIndex >= EQ::invbag::SLOT_COUNT)) {
+			return INVALID_INDEX;
+		}
+
+		int16 parent = INVALID_INDEX;
+		if (typed.Type == EQ::invtype::typePossessions && EQ::ValueWithin(typed.Slot, EQ::invslot::POSSESSIONS_BEGIN, EQ::invslot::POSSESSIONS_END)) {
+			parent = typed.Slot;
+		} else if (typed.Type == EQ::invtype::typeBank && EQ::ValueWithin(typed.Slot, 0, EQ::invslot::BANK_END - EQ::invslot::BANK_BEGIN)) {
+			parent = EQ::invslot::BANK_BEGIN + typed.Slot;
+		} else if (typed.Type == EQ::invtype::typeSharedBank && EQ::ValueWithin(typed.Slot, 0, EQ::invslot::SHARED_BANK_END - EQ::invslot::SHARED_BANK_BEGIN)) {
+			parent = EQ::invslot::SHARED_BANK_BEGIN + typed.Slot;
+		}
+
+		if (parent == INVALID_INDEX) {
+			return INVALID_INDEX;
+		}
+
+		const int16 slot = typed.SubIndex == INVALID_INDEX ? parent : EQ::InventoryProfile::CalcSlotId(parent, static_cast<uint8>(typed.SubIndex));
+		if (slot == INVALID_INDEX || !IsValidSlot(slot)) {
+			return INVALID_INDEX;
+		}
+
+		// a slot inside a bag needs the bag, and the bag needs that many slots
+		const int16 bag_slot = EQ::InventoryProfile::CalcSlotId(slot);
+		if (bag_slot != INVALID_INDEX) {
+			const EQ::ItemInstance* bag = m_inv.GetItem(bag_slot);
+			if (!bag || !bag->IsClassBag() || EQ::InventoryProfile::CalcBagIdx(slot) >= bag->GetItem()->BagSlots) {
+				return INVALID_INDEX;
+			}
+		}
+
+		return slot;
+	};
+
+	struct MultiMove {
+		int16  from_slot;
+		int16  to_slot;
+		uint32 number_in_stack;
+	};
+
+	std::vector<MultiMove> moves;
+	moves.reserve(multi_move->count);
+
+	// CTRL + left click drops an item into a bag without opening it.
+	// This can be a bag, in which case it tries to fill the target bag with the contents of the bag on the cursor
+	// CTRL + right click swaps the contents of two bags if a bag is on your cursor and you ctrl-right click on another bag.
+	// It's a left click (purely additive) if everything comes from the cursor.
+	bool left_click = multi_move->count > 0;
+	bool valid      = multi_move->count > 0;
+	for (uint32 i = 0; i < multi_move->count; i++) {
+		const MultiMoveItemSub_Struct& move = multi_move->moves[i];
+		const MultiMove m{ to_server_slot(move.from_slot), to_server_slot(move.to_slot), move.number_in_stack };
+
+		if (move.from_slot.Type != EQ::invtype::typePossessions || move.from_slot.Slot != EQ::invslot::slotCursor) {
+			left_click = false;
+		}
+
+		if (m.from_slot == INVALID_INDEX || m.to_slot == INVALID_INDEX || !m_inv.GetItem(m.from_slot)) {
+			valid = false;
+		}
+
+		moves.push_back(m);
+	}
+
+	// The swap pops every source before placing anything, so each source must be listed once, and each
+	// destination must be listed once and be empty or one of the sources (otherwise its item would be overwritten)
+	if (valid && !left_click) {
+		std::set<int16> from_slots;
+		std::set<int16> to_slots;
+		for (const MultiMove& m : moves) {
+			if (!from_slots.insert(m.from_slot).second || !to_slots.insert(m.to_slot).second) {
+				valid = false;
+			}
+		}
+
+		for (const MultiMove& m : moves) {
+			if (m_inv.GetItem(m.to_slot) && !from_slots.count(m.to_slot)) {
+				valid = false;
+			}
+		}
+	}
+
+	// Reject the whole move and resend the bags involved, so the client puts the items back where they are
+	if (!valid) {
+		LogInventory("[{}] rejected a move of [{}] items: a slot doesn't exist or doesn't fit", GetCleanName(), multi_move->count);
+
+		std::set<std::pair<int16, int16>> resynced;
+		for (const MultiMove& m : moves) {
+			auto parent_of = [](int16 slot) {
+				const int16 parent = EQ::InventoryProfile::CalcSlotId(slot);
+				return parent == INVALID_INDEX ? slot : parent;
+			};
+
+			const int16 from_parent = m.from_slot == INVALID_INDEX ? INVALID_INDEX : parent_of(m.from_slot);
+			const int16 to_parent   = m.to_slot == INVALID_INDEX ? INVALID_INDEX : parent_of(m.to_slot);
+			if ((from_parent == INVALID_INDEX && to_parent == INVALID_INDEX) || !resynced.insert({ from_parent, to_parent }).second) {
+				continue;
+			}
+
+			MoveItem_Struct resync{};
+			resync.from_slot = from_parent != INVALID_INDEX ? from_parent : to_parent;
+			resync.to_slot   = to_parent != INVALID_INDEX ? to_parent : from_parent;
+			SwapItemResync(&resync);
+		}
+
+		return;
+	}
+
+	// This is a left click which is purely additive. This should always be cursor object or cursor bag contents into general\bank\whatever bag
+	if (left_click) {
+		for (const MultiMove& m : moves) {
+			const EQ::ItemInstance* from_item = m_inv.GetItem(m.from_slot);
+			if (!from_item) {
+				continue; // an earlier move in this packet already took it
+			}
+
+			MoveItem_Struct mi{};
+			mi.from_slot = m.from_slot;
+			mi.to_slot   = m.to_slot;
+
+			// This sends '1' as the stack count for unstackable items, which our titanium-era SwapItem blows up
+			mi.number_in_stack = from_item->IsStackable() ? m.number_in_stack : 0;
+
+			if (!SwapItem(&mi)) {
+				bool error = false;
+				SwapItemResync(&mi);
+				InterrogateInventory(this, false, true, false, error, false);
+				if (error) {
+					InterrogateInventory(this, true, false, true, error);
+				}
+			}
+		}
+
+		return;
+	}
+
+	// This is the swap.
+	// Client behavior is just to move stacks without combining them
+	// Items get rearranged to fill the 'top' of the bag first
+	std::vector<std::pair<EQ::ItemInstance*, int16>> popped;
+	popped.reserve(moves.size());
+
+	for (const MultiMove& m : moves) {
+		EQ::ItemInstance* item = m_inv.PopItem(m.from_slot); // checked above, so it is there
+		popped.emplace_back(item, m.to_slot);
+		database.SaveInventory(CharacterID(), nullptr, m.from_slot); // We have to manually save inventory here.
+	}
+
+	for (auto& [item, to_slot] : popped) {
+		if (item) {
+			PutItemInInventory(to_slot, *item); // This saves inventory too
+			safe_delete(item); // PutItemInInventory stores a copy
+		}
 	}
 }
 
@@ -15283,8 +15399,15 @@ void Client::Handle_OP_ShopPlayerBuy(const EQApplicationPacket *app)
 		return;
 	}
 
-	// this area needs some work..two inventory insertion check failure points
-	// below do not return player's money..is this the intended behavior?
+	// check for room before taking the money; a full inventory used to keep the money and leave the client's
+	// quantity window waiting for a reply
+	if (!HasRoomForMerchantItem(item, charges)) {
+		Message(Chat::Red, "You do not have room for any more items.");
+		safe_delete(outapp);
+		safe_delete(inst);
+		SendMerchantEnd();
+		return;
+	}
 
 	if (!TakeMoneyFromPP(mpo->price)) {
 		auto message = fmt::format(
@@ -15310,8 +15433,6 @@ void Client::Handle_OP_ShopPlayerBuy(const EQApplicationPacket *app)
 	if (!stacked) {
 		freeslotid = m_inv.FindFreeSlot(false, true, item->Size);
 	}
-
-	// shouldn't we be reimbursing if these two fail?
 
 	//make sure we are not completely full...
 	if (freeslotid == EQ::invslot::slotCursor) {
@@ -17613,6 +17734,30 @@ void Client::Handle_OP_XTargetRequest(const EQApplicationPacket *app)
 			XTargets[Slot].ID = m->GetID();
 			SendXTargetPacket(Slot, m);
 
+		}
+		break;
+	}
+	case MyMercenary:
+	{
+		Mob *m = GetMerc();
+		if (m)
+		{
+			XTargets[Slot].ID = m->GetID();
+			SendXTargetPacket(Slot, m);
+		}
+		break;
+	}
+	case MyMercenaryTarget:
+	{
+		Mob *m = GetMerc();
+
+		if (m)
+			m = m->GetTarget();
+
+		if (m)
+		{
+			XTargets[Slot].ID = m->GetID();
+			SendXTargetPacket(Slot, m);
 		}
 		break;
 	}

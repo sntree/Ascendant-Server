@@ -3509,6 +3509,35 @@ bool Perl_Client_SetMarketplaceCoins(Client* self, uint32 amount, std::string no
 	return self->SetMarketplaceCoins(amount, "quest", note);
 }
 
+perl::reference Perl_Client_GetPersonaClasses(Client* self) // @categories Account and Character
+{
+	perl::hash persona_hash;
+
+	for (const auto& [class_id, level] : self->GetPersonaClasses()) {
+		persona_hash[std::to_string(class_id)] = level;
+	}
+
+	return perl::reference(persona_hash);
+}
+
+uint8 Perl_Client_GetPersonaLevel(Client* self, uint32 class_id) // @categories Account and Character
+{
+	if (class_id < Class::Warrior || class_id > Class::PLAYER_CLASS_COUNT) {
+		return 0;
+	}
+
+	return self->GetPersonaLevel(static_cast<uint8>(class_id));
+}
+
+bool Perl_Client_HasPersona(Client* self, uint32 class_id) // @categories Account and Character
+{
+	if (class_id < Class::Warrior || class_id > Class::PLAYER_CLASS_COUNT) {
+		return false;
+	}
+
+	return self->HasPersona(static_cast<uint8>(class_id));
+}
+
 void perl_register_client()
 {
 	perl::interpreter perl(PERL_GET_THX);
@@ -3764,6 +3793,8 @@ void perl_register_client()
 	package.add("GetMemmedSpells", &Perl_Client_GetMemmedSpells);
 	package.add("GetModCharacterFactionLevel", &Perl_Client_GetModCharacterFactionLevel);
 	package.add("GetMoney", &Perl_Client_GetMoney);
+	package.add("GetPersonaClasses", &Perl_Client_GetPersonaClasses);
+	package.add("GetPersonaLevel", &Perl_Client_GetPersonaLevel);
 	package.add("GetPotionBeltItemIcon", &Perl_Client_GetPotionBeltItemIcon);
 	package.add("GetPotionBeltItemID", &Perl_Client_GetPotionBeltItemID);
 	package.add("GetPotionBeltItemName", &Perl_Client_GetPotionBeltItemName);
@@ -3815,6 +3846,7 @@ void perl_register_client()
 	package.add("HasItemEquippedByID", &Perl_Client_HasItemEquippedByID);
 	package.add("HasItemOnCorpse", &Perl_Client_HasItemOnCorpse);
 	package.add("HasPEQZoneFlag", &Perl_Client_HasPEQZoneFlag);
+	package.add("HasPersona", &Perl_Client_HasPersona);
 	package.add("HasRecipeLearned", &Perl_Client_HasRecipeLearned);
 	package.add("HasSkill", &Perl_Client_HasSkill);
 	package.add("HasSpellScribed", &Perl_Client_HasSpellScribed);

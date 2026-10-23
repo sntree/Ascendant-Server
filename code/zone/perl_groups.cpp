@@ -140,7 +140,8 @@ Client* Perl_Group_GetMember(Group* self, int member_index) // @categories Accou
 		member = self->members[member_index];
 	}
 
-	return member ? member->CastToClient() : nullptr;
+	// mercs and bots share group slots; handing them out as Client* let scripts call client-only methods on them
+	return member && member->IsClient() ? member->CastToClient() : nullptr;
 }
 
 uint8_t Perl_Group_GetMemberRole(Group* self, Mob* member) // @categories Account and Character, Script Utility, Group

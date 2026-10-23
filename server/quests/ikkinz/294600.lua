@@ -30,7 +30,8 @@ end
 
 function event_death_complete(e)
 	local qglobals = eq.get_qglobals(e.self);
-	if (qglobals[instance_id .. "vrexkill3"] == tostring(e.other:GetClass())) then
+	-- Ascendant: any class can finish the sentinel (was: killing blow by a random class in zone; pets/departed classes made it respawn forever)
+	if true then
 		eq.zone_emote(MT.Yellow,"The sentinel's rubble drops to the ground. It has been defeated.");
 		eq.signal(294597,1,0); -- NPC: #Trigger_Ikkinz_3
 	else

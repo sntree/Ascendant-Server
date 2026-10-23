@@ -101,6 +101,16 @@ EQ::ItemInstance* ItemInstQueue::peek_front() const
 //
 EQ::InventoryProfile::~InventoryProfile()
 {
+	for (auto *maps : {&m_worn, &m_inv, &m_bank, &m_shbank, &m_trade, &m_keyring, &m_dragon_hoard, &m_merc_equipment, &m_equipment_keyring}) {
+		for (auto &[slot_id, inst] : *maps) {
+			ItemInstance::ReleasePersistedSerials(inst);
+		}
+	}
+
+	for (auto iter = m_cursor.cbegin(); iter != m_cursor.cend(); ++iter) {
+		ItemInstance::ReleasePersistedSerials(*iter);
+	}
+
 	for (auto iter = m_worn.begin(); iter != m_worn.end(); ++iter) {
 		safe_delete(iter->second);
 	}
@@ -142,6 +152,18 @@ EQ::InventoryProfile::~InventoryProfile()
 	}
 
 	m_dragon_hoard.clear();
+
+	for (auto iter = m_merc_equipment.begin(); iter != m_merc_equipment.end(); ++iter) {
+		safe_delete(iter->second);
+	}
+
+	m_merc_equipment.clear();
+
+	for (auto iter = m_equipment_keyring.begin(); iter != m_equipment_keyring.end(); ++iter) {
+		safe_delete(iter->second);
+	}
+
+	m_equipment_keyring.clear();
 }
 
 void EQ::InventoryProfile::SetInventoryVersion(versions::MobVersion inventory_version) {
@@ -187,6 +209,10 @@ EQ::ItemInstance* EQ::InventoryProfile::GetItem(int16 slot_id) const
 		result = _GetItem(m_keyring, slot_id);
 	} else if (invslot::IsDragonHoardSlot(slot_id)) {
 		result = _GetItem(m_dragon_hoard, slot_id);
+	} else if (invslot::IsMercEquipmentSlot(slot_id)) {
+		result = _GetItem(m_merc_equipment, slot_id);
+	} else if (invslot::IsEquipmentKeyRingSlot(slot_id)) {
+		result = _GetItem(m_equipment_keyring, slot_id);
 	} else if (EQ::ValueWithin(slot_id, invslot::TRADE_BEGIN, invslot::TRADE_END)) {
 		result = _GetItem(m_trade, slot_id);
 	} else if (EQ::ValueWithin(slot_id, invslot::SHARED_BANK_BEGIN, invslot::SHARED_BANK_END)) {
@@ -520,6 +546,18 @@ EQ::ItemInstance* EQ::InventoryProfile::PopItem(int16 slot_id)
 		if (it != m_dragon_hoard.end()) {
 			p = it->second;
 			m_dragon_hoard.erase(it);
+		}
+	} else if (invslot::IsMercEquipmentSlot(slot_id)) {
+		auto it = m_merc_equipment.find(slot_id);
+		if (it != m_merc_equipment.end()) {
+			p = it->second;
+			m_merc_equipment.erase(it);
+		}
+	} else if (invslot::IsEquipmentKeyRingSlot(slot_id)) {
+		auto it = m_equipment_keyring.find(slot_id);
+		if (it != m_equipment_keyring.end()) {
+			p = it->second;
+			m_equipment_keyring.erase(it);
 		}
 	} else {
 	// Is slot inside bag?
@@ -1345,6 +1383,16 @@ int EQ::InventoryProfile::GetSlotByItemInst(ItemInstance *inst) {
 		return i;
 	}
 
+	i = GetSlotByItemInstCollection(m_merc_equipment, inst);
+	if (i != INVALID_INDEX) {
+		return i;
+	}
+
+	i = GetSlotByItemInstCollection(m_equipment_keyring, inst);
+	if (i != INVALID_INDEX) {
+		return i;
+	}
+
 	if (m_cursor.peek_front() == inst) {
 		return invslot::slotCursor;
 	}
@@ -1512,6 +1560,12 @@ int16 EQ::InventoryProfile::_PutItem(int16 slot_id, ItemInstance* inst)
 		result = slot_id;
 	} else if (invslot::IsDragonHoardSlot(slot_id)) {
 		m_dragon_hoard[slot_id] = inst;
+		result = slot_id;
+	} else if (invslot::IsMercEquipmentSlot(slot_id)) {
+		m_merc_equipment[slot_id] = inst;
+		result = slot_id;
+	} else if (invslot::IsEquipmentKeyRingSlot(slot_id)) {
+		m_equipment_keyring[slot_id] = inst;
 		result = slot_id;
 	} else {
 		// Slot must be within a bag

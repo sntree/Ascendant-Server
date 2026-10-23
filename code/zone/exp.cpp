@@ -972,6 +972,7 @@ void Client::SetLevel(uint8 set_level, bool command)
 	safe_delete(outapp);
 	SendAppearancePacket(AppearanceType::WhoLevel, set_level); // who level change
 	AchievementEvent(Achievement::EventType::ReachLevel, 0, set_level);
+	UpdatePersonaLevel();
 
 	LogInfo("Setting Level for [{}] to [{}]", GetName(), set_level);
 

@@ -45,6 +45,7 @@ set(common_sources
 	evolving_items.cpp
 	extprofile.cpp
 	faction.cpp
+	fellowship_base.cpp
 	file.cpp
 	guild_base.cpp
 	inventory_profile.cpp
@@ -107,6 +108,7 @@ set(common_sources
 	path_manager.cpp
 	perl_eqdb_res.cpp
 	perl_eqdb.cpp
+	persona.cpp
 	platform.cpp
 	proc_launcher.cpp
 	process.cpp
@@ -188,6 +190,7 @@ set(repositories
 	repositories/base/base_character_currency_repository.h
 	repositories/base/base_character_data_repository.h
 	repositories/base/base_character_disciplines_repository.h
+	repositories/base/base_character_equipment_sets_repository.h
 	repositories/base/base_character_evolving_items_repository.h
 	repositories/base/base_character_exp_modifiers_repository.h
 	repositories/base/base_character_expedition_lockouts_repository.h
@@ -201,6 +204,20 @@ set(repositories
 	repositories/base/base_character_parcels_containers_repository.h
 	repositories/base/base_character_parcels_repository.h
 	repositories/base/base_character_peqzone_flags_repository.h
+	repositories/base/base_character_persona_alternate_abilities_repository.h
+	repositories/base/base_character_persona_bandolier_repository.h
+	repositories/base/base_character_persona_bind_repository.h
+	repositories/base/base_character_persona_buffs_repository.h
+	repositories/base/base_character_persona_data_buckets_repository.h
+	repositories/base/base_character_persona_disciplines_repository.h
+	repositories/base/base_character_persona_memmed_spells_repository.h
+	repositories/base/base_character_persona_pet_buffs_repository.h
+	repositories/base/base_character_persona_pet_info_repository.h
+	repositories/base/base_character_persona_pet_inventory_repository.h
+	repositories/base/base_character_persona_skills_repository.h
+	repositories/base/base_character_persona_spells_repository.h
+	repositories/base/base_character_persona_timers_repository.h
+	repositories/base/base_character_personas_repository.h
 	repositories/base/base_character_pet_buffs_repository.h
 	repositories/base/base_character_pet_info_repository.h
 	repositories/base/base_character_pet_inventory_repository.h
@@ -231,6 +248,9 @@ set(repositories
 	repositories/base/base_faction_list_mod_repository.h
 	repositories/base/base_faction_list_repository.h
 	repositories/base/base_faction_values_repository.h
+	repositories/base/base_fellowship_campsites_repository.h
+	repositories/base/base_fellowship_members_repository.h
+	repositories/base/base_fellowships_repository.h
 	repositories/base/base_fishing_repository.h
 	repositories/base/base_forage_repository.h
 	repositories/base/base_friends_repository.h
@@ -394,6 +414,7 @@ set(repositories
 	repositories/character_data_repository.h
 	repositories/character_disciplines_repository.h
 	repositories/character_evolving_items_repository.h
+	repositories/character_equipment_sets_repository.h
 	repositories/character_exp_modifiers_repository.h
 	repositories/character_expedition_lockouts_repository.h
 	repositories/character_inspect_messages_repository.h
@@ -406,6 +427,20 @@ set(repositories
 	repositories/character_parcels_containers_repository.h
 	repositories/character_parcels_repository.h
 	repositories/character_peqzone_flags_repository.h
+	repositories/character_persona_alternate_abilities_repository.h
+	repositories/character_persona_bandolier_repository.h
+	repositories/character_persona_bind_repository.h
+	repositories/character_persona_buffs_repository.h
+	repositories/character_persona_data_buckets_repository.h
+	repositories/character_persona_disciplines_repository.h
+	repositories/character_persona_memmed_spells_repository.h
+	repositories/character_persona_pet_buffs_repository.h
+	repositories/character_persona_pet_info_repository.h
+	repositories/character_persona_pet_inventory_repository.h
+	repositories/character_persona_skills_repository.h
+	repositories/character_persona_spells_repository.h
+	repositories/character_persona_timers_repository.h
+	repositories/character_personas_repository.h
 	repositories/character_pet_buffs_repository.h
 	repositories/character_pet_info_repository.h
 	repositories/character_pet_inventory_repository.h
@@ -436,6 +471,9 @@ set(repositories
 	repositories/faction_list_mod_repository.h
 	repositories/faction_list_repository.h
 	repositories/faction_values_repository.h
+	repositories/fellowship_campsites_repository.h
+	repositories/fellowship_members_repository.h
+	repositories/fellowships_repository.h
 	repositories/fishing_repository.h
 	repositories/forage_repository.h
 	repositories/friends_repository.h
@@ -615,6 +653,8 @@ set(common_headers
 	evolving_items.h
 	extprofile.h
 	faction.h
+	fellowship.h
+	fellowship_base.h
 	features.h
 	file.h
 	fixed_memory_hash_set.h
@@ -712,6 +752,7 @@ set(common_headers
 	patches/uf_ops.h
 	patches/uf_structs.h
 	patches/uf.h
+	persona.h
 	platform.h
 	platform/inet.h
 	platform/platform.h

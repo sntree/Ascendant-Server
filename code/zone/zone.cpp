@@ -41,6 +41,7 @@
 #include "common/serverinfo.h"
 #include "common/strings.h"
 #include "zone/dynamic_zone.h"
+#include "zone/fellowship_manager.h"
 #include "zone/guild_mgr.h"
 #include "zone/map.h"
 #include "zone/mob_movement_manager.h"
@@ -838,7 +839,7 @@ void Zone::LoadMercenarySpells()
 		merc_spells_list[class_id].push_back(
 			MercSpellEntry{
 				.proficiencyid = static_cast<uint8>(Strings::ToUnsignedInt(row[1])),
-				.spellid = static_cast<uint16>(Strings::ToUnsignedInt(row[2])),
+				.spellid = static_cast<int32>(Strings::ToUnsignedInt(row[2])),
 				.type = Strings::ToUnsignedInt(row[3]),
 				.stance = static_cast<int16>(Strings::ToInt(row[4])),
 				.minlevel = static_cast<uint8>(Strings::ToUnsignedInt(row[5])),
@@ -1220,6 +1221,12 @@ bool Zone::Init(bool is_static) {
 	PetitionList::Instance()->ReadDatabase();
 
 	guild_mgr.LoadGuilds();
+
+	// TOB+ fellowships: reload, then give this zone its campfires back
+	if (RuleB(Character, EnableFellowships)) {
+		ZoneFellowshipManager::Instance()->SetDatabase(&database)->LoadFellowships();
+		ZoneFellowshipManager::Instance()->SpawnCampsitesForThisZone();
+	}
 
 	LogInfo("Zone booted successfully zone_id [{}] time_offset [{}]", zoneid, zone_time.getEQTimeZone());
 
@@ -1980,6 +1987,10 @@ void Zone::Repop(bool is_forced)
 	initgrids_timer.Start();
 
 	entity_list.UpdateAllTraps(true, true);
+
+	if (RuleB(Character, EnableFellowships)) {
+		ZoneFellowshipManager::Instance()->RespawnCampfires();
+	}
 }
 
 void Zone::GetTimeSync()

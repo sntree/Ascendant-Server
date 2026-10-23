@@ -109,6 +109,7 @@ private:
 	bool HandleGenerateRandomNamePacket(const EQApplicationPacket *app);
 	bool HandleCharacterCreateRequestPacket(const EQApplicationPacket *app);
 	bool HandleCharacterCreatePacket(const EQApplicationPacket *app);
+	bool HandlePersonaCharCreatePacket(const EQApplicationPacket *app);
 	bool HandleEnterWorldPacket(const EQApplicationPacket *app);
 	bool HandleDeleteCharacterPacket(const EQApplicationPacket *app);
 	bool HandleZoneChangePacket(const EQApplicationPacket *app);

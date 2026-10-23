@@ -1271,8 +1271,7 @@ bool Mob::SpellEffect(Mob* caster, int32 spell_id, float partial, int level_over
 							charges = 1;
 
 						if (SummonedItem) {
-							c->PushItemOnCursor(*SummonedItem);
-							c->SendItemPacket(EQ::invslot::slotCursor, SummonedItem, ItemPacketLimbo);
+							c->PushItemOnCursor(*SummonedItem, true);
 							safe_delete(SummonedItem);
 						}
 						SummonedItem = database.CreateItem(spell.base_value[i], charges);
@@ -3532,8 +3531,7 @@ bool Mob::SpellEffect(Mob* caster, int32 spell_id, float partial, int level_over
 
 	if (SummonedItem) {
 		Client *c=CastToClient();
-		c->PushItemOnCursor(*SummonedItem);
-		c->SendItemPacket(EQ::invslot::slotCursor, SummonedItem, ItemPacketLimbo);
+		c->PushItemOnCursor(*SummonedItem, true);
 		safe_delete(SummonedItem);
 	}
 

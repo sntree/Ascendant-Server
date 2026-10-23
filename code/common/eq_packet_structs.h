@@ -17,6 +17,7 @@
 */
 #pragma once
 
+#include "common/classes.h"
 #include "common/emu_constants.h"
 #include "common/textures.h"
 #include "common/types.h"
@@ -185,6 +186,7 @@ struct CharacterSelectEntry_Struct
 	uint8 Enabled;				// Originally labeled as 'CharEnabled' - unknown purpose and setting
 	uint32 LastLogin;
 	uint8 Unknown2;				// Seen 0
+	uint32 character_id;
 };
 
 struct CharacterSelect_Struct
@@ -2522,7 +2524,8 @@ struct GroupUpdate2_Struct {
 /*0766*/	uint32	NPCMarkerID;	// EntityID of player delegated MarkNPC ability
 /*0780*/	uint32	group_id;		// TOB+: sent first in the roster; the client needs it non-zero
 /*0784*/	uint8	unknown784[52];
-/*0836*/
+/*0836*/	char	member_merc_owner[5][64];	// TOB+: owner name when membername[i] is a mercenary, else empty
+/*1156*/
 };
 struct GroupJoin_Struct {
 /*0000*/	uint32	action;
@@ -4622,6 +4625,79 @@ struct AchievementCompareRequest_Struct {
 /*08*/
 };
 
+// TOB+ fellowships: client-neutral; the TOB patch adds the world id to the 64-bit ids
+struct FellowshipMember_Struct {
+/*000*/ uint32 character_id;
+/*004*/ char   name[64];
+/*068*/ uint16 zone_id;         // 0 while zoning or offline
+/*070*/ uint16 instance_id;
+/*072*/ uint32 level;
+/*076*/ uint32 class_;
+/*080*/ uint32 last_on;         // unix seconds
+/*084*/ uint8  is_exp_sharing;
+/*085*/ uint8  is_exp_capped;   // always 0: vitality is not implemented
+/*086*/ uint8  is_offline_mode; // always 0
+/*087*/ uint8  unused087;
+/*088*/
+};
+
+struct FellowshipCampsite_Struct {
+/*00*/ float  x;
+/*04*/ float  y;
+/*08*/ float  z;
+/*12*/ uint16 zone_id;
+/*14*/ uint16 instance_id;
+/*16*/ uint32 expires_at;       // 0 = no campsite
+/*20*/ uint32 campfire_type;
+/*24*/
+};
+
+struct FellowshipUpdate_Struct {
+/*0000*/ uint32                    fellowship_id;
+/*0004*/ char                      motd[1024];
+/*1028*/ uint32                    member_count;
+/*1032*/ FellowshipMember_Struct   members[12];  // the leader first
+/*2088*/ FellowshipCampsite_Struct campsite;
+/*2112*/
+};
+
+struct FellowshipAction_Struct {
+/*0000*/ uint32 action;              // FellowshipAction
+/*0004*/ uint32 target_character_id;
+/*0008*/ uint32 fellowship_id;       // toggle exp sharing only
+/*0012*/ uint32 campfire_type;       // create campsite only
+/*0016*/ char   motd[1024];          // set MOTD only, always terminated
+/*1040*/
+};
+
+struct FellowshipInvite_Struct {
+/*00*/ uint32 target_character_id;
+/*04*/ uint32 inviter_character_id;
+/*08*/ uint32 fellowship_id;
+/*12*/
+};
+
+struct FellowshipCampfireListRequest_Struct {
+/*00*/ uint8 only_usable;
+/*01*/ uint8 unused01[3];
+/*04*/ int32 category;               // -1 = all
+/*08*/
+};
+
+struct FellowshipCampfireListEntry_Struct {
+/*00*/ uint8  is_usable;
+/*01*/ uint8  unused01[3];
+/*04*/ uint32 campfire_type;         // create campsite sends it back
+/*08*/ uint32 description_id;        // dbstr id
+/*12*/ char   name[64];
+/*76*/
+};
+
+struct FellowshipCampfireList_Struct {
+/*00*/ uint32                             count;
+/*04*/ FellowshipCampfireListEntry_Struct entries[0];
+};
+
 //variable length packet of points
 struct FindPersonResult_Struct {
 	FindPerson_Point dest;
@@ -6257,6 +6333,76 @@ struct MaxCharacters_Struct
 /*000*/ uint32 max_chars;	// Seen 4 on Silver Account (4 characters max)
 /*004*/ uint32 unknown004;	// Seen 0
 /*008*/ uint32 unknown008;	// Seen 0
+/*012*/ uint32 persona_slots;	// TOB+: alternate classes a character can create
+};
+
+// OP_PersonaCreate (C2S) and OP_PersonaSwitch: the persona window's request
+struct PersonaRequest_Struct {
+/*00*/ uint32 target_class;
+/*04*/ uint8  aa_purchasable;
+/*05*/ uint8  auto_save_equipment_set;
+/*06*/ uint32 current_class;
+/*10*/
+};
+
+// OP_PersonaCreate (S2C): there is no refusal form, any reply starts the client's create camp
+struct PersonaCreateApproval_Struct {
+/*00*/ uint32 class_id;
+/*04*/ uint64 character_id;
+/*12*/ uint8  offer_now;
+/*13*/
+};
+
+// OP_PersonaCharCreate (world): the character creator's choices for a new class of an existing character
+struct PersonaCharCreate_Struct {
+/*000*/ char              name[64];
+/*064*/ uint64            character_id;
+/*072*/ CharCreate_Struct create;
+};
+
+struct PersonaClassEntry_Struct {
+/*00*/ uint32 class_id;
+/*04*/ uint32 level;
+/*08*/
+};
+
+struct PersonaClassList_Struct {
+/*000*/ uint32                   count;
+/*004*/ PersonaClassEntry_Struct entries[Class::PLAYER_CLASS_COUNT];
+};
+
+struct EquipmentSetAction_Struct {
+/*00*/ uint32 action;
+/*04*/ uint32 class_id;
+/*08*/ uint16 unknown008;
+/*10*/
+};
+
+// OP_EquipmentKeyRingOption C2S: sent after zone-in and whenever the "Store Equipment Set items" box changes
+struct EquipmentKeyRingOption_Struct {
+/*00*/ uint8 store_equipment_sets;
+/*01*/
+};
+
+// OP_EquipmentKeyRingOption S2C: the Equipment key ring tab's size (0 = off) and the stored option
+struct EquipmentKeyRingOwner_Struct {
+	uint16 index;      // ring index
+	uint16 class_mask; // bit (class - 1) for every class whose equipment set holds the item
+};
+
+struct EquipmentKeyRingState_Struct {
+	uint32                       capacity;
+	uint8                        store_equipment_sets;
+	uint16                       owner_count;
+	EquipmentKeyRingOwner_Struct owners[EQ::invslot::EQUIPMENT_KEYRING_SIZE];
+};
+
+// OP_PersonaSwap (self form): followed by item_count EQ::InternalSerializedItem_Struct, as OP_CharInventory
+struct PersonaSwap_Struct {
+	uint32               spawn_id;
+	uint32               item_count;
+	Spawn_Struct         spawn;
+	PlayerProfile_Struct profile;
 };
 
 struct Membership_Struct
@@ -6419,6 +6565,48 @@ struct NoMercenaryHired_Struct {
 /*0008*/	uint32	MercID;				// Seen 1 when no merc is hired - ID unique to each type of mercenary
 /*0012*/
 };
+
+// OP_MercenaryOwnerLink (TOB+): sent to every client for each merc spawn, {0, owner} on despawn
+struct MercenaryOwnerLink_Struct {
+/*0000*/	uint32	merc_entity_id;
+/*0004*/	uint32	owner_entity_id;
+/*0008*/
+};
+
+// OP_MercenaryU32Field274 (TOB+): the owner's own merc entity id, 0 when none is spawned
+struct MercenaryActiveEntity_Struct {
+/*0000*/	uint32	merc_entity_id;
+/*0004*/
+};
+
+// OP_MercenaryTable44 (TOB+): u32 count, then count x {u32 index, u32 value}. The Merc tab of the inventory window
+// reads these; pairs of base/current values are colored by comparing the two, so only the current value is shown.
+namespace MercenaryStat {
+	enum Index : uint32 {
+		MaxHPBase, MaxHP,
+		MaxManaBase, MaxMana,
+		MaxEnduranceBase, MaxEndurance,
+		ACBase, AC,
+		EvasionBase, Evasion,
+		OffenseBase, Offense,
+		AccuracyBase, Accuracy,
+		Haste,
+		STRBase, STR,
+		STABase, STA,
+		INTBase, INT,
+		WISBase, WIS,
+		AGIBase, AGI,
+		DEXBase, DEX,
+		CHABase, CHA,
+		HPRegenBase, HPRegen,
+		ManaRegenBase, ManaRegen,
+		EnduranceRegenBase, EnduranceRegen,
+		HealAmount,
+		SpellDamage,
+		HeroicSTR, HeroicSTA, HeroicDEX, HeroicAGI, HeroicWIS, HeroicINT, HeroicCHA,
+		Count
+	};
+}
 
 // OP_MercenaryAssign (Same packet as NoMercenaryHired_Struct?)
 struct MercenaryAssign_Struct {

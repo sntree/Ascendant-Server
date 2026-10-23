@@ -960,16 +960,17 @@ void Client::OnDisconnect(bool hard_disconnect) {
 			GetGroup()->MemberZoned(this);
 		}
 
-		if (GetMerc()) {
-			GetMerc()->Save();
-			GetMerc()->Depop();
-		}
-
 		auto* r = entity_list.GetRaidByClient(this);
 
 		if (r) {
 			r->MemberZoned(this);
 		}
+	}
+
+	// a GM or instant logout takes the soft path; zoning moves the merc with its owner instead
+	if (GetMerc() && (hard_disconnect || !bZoning)) {
+		GetMerc()->Save();
+		GetMerc()->Depop();
 	}
 
 	if (!bZoning) {
@@ -1104,6 +1105,23 @@ void Client::BulkSendInventoryItems()
 
 			if (ob.tellp() == last_pos) {
 				LogInventory("Serialization failed on key ring slot [{}] during BulkSendInventoryItems. Item skipped", slot_id);
+			}
+
+			last_pos = ob.tellp();
+		}
+	}
+
+	// TOB+ merc equipment tab items go in the same list, with type 25 as the slot type
+	if (IsMercEquipmentEnabled()) {
+		for (const auto &[slot_id, inst] : m_inv.GetMercEquipmentItems()) {
+			if (!inst) {
+				continue;
+			}
+
+			inst->Serialize(ob, slot_id);
+
+			if (ob.tellp() == last_pos) {
+				LogInventory("Serialization failed on merc equipment slot [{}] during BulkSendInventoryItems. Item skipped", slot_id);
 			}
 
 			last_pos = ob.tellp();

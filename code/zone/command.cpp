@@ -179,6 +179,7 @@ int command_init(void)
 		command_add("makepet", "[Pet Name] - Make a pet", AccountStatus::Guide, command_makepet) ||
 		command_add("marketplacecoins", "[show|add|remove|set] [amount] - Show or change the account-wide Marketplace Coins of yourself or your target", AccountStatus::GMMgmt, command_marketplacecoins) ||
 		command_add("memspell", "[Spell ID] [Spell Gem] - Memorize a Spell by ID to the specified Spell Gem for you or your target", AccountStatus::Guide, command_memspell) ||
+		command_add("merc", "[status|assist|hold|back|follow|heal|announce|ae] - See and change how your mercenary behaves", AccountStatus::Player, command_merc) ||
 		command_add("merchantshop", "Closes or opens your target merchant's shop", AccountStatus::GMAdmin, command_merchantshop) ||
 		command_add("modifynpcstat", "[Stat] [Value] - Modifies an NPC's stats temporarily.", AccountStatus::GMLeadAdmin, command_modifynpcstat) ||
 		command_add("movechar", "[Character ID|Character Name] [Zone ID|Zone Short Name] - Move an offline character to the specified zone", AccountStatus::Guide, command_movechar) ||
@@ -203,6 +204,7 @@ int command_init(void)
 		command_add("parcels", "View and edit the parcel system.  Requires parcels to be enabled in rules.", AccountStatus::GMMgmt, command_parcels) ||
 		command_add("path", "view and edit pathing", AccountStatus::GMMgmt, command_path) ||
 		command_add("peqzone", "[Zone ID|Zone Short Name] - Teleports you to the specified zone if you meet the requirements.", AccountStatus::Player, command_peqzone) ||
+		command_add("persona", "[list|switch|delete] [class id or name] - List, switch or delete the alternate classes (personas) of yourself or your target", AccountStatus::GMMgmt, command_persona) ||
 		command_add("petitems", "View your pet's items if you have one", AccountStatus::ApprenticeGuide, command_petitems) ||
 		command_add("picklock", "Analog for ldon pick lock for the newer clients since we still don't have it working.", AccountStatus::Player, command_picklock) ||
 		command_add("profanity", "Manage censored language.", AccountStatus::GMLeadAdmin, command_profanity) ||

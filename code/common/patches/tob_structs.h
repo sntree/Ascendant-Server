@@ -244,6 +244,167 @@ namespace TOB {
 			/*a8*/
 		};
 
+		// OP_PersonaCharCreate: CharCreate_Struct with the owning character in its padding
+		struct PersonaCharCreate_Struct
+		{
+			/*00*/ char name[64];
+			/*40*/ uint64 character_id;
+			/*48*/ uint32 gender;
+			/*4c*/ uint32 race;
+			/*50*/ uint32 class_;
+			/*54*/ uint32 deity;
+			/*58*/ uint32 start_zone;
+			/*5c*/ uint32 haircolor;
+			/*60*/ uint32 beard;
+			/*64*/ uint32 beardcolor;
+			/*68*/ uint32 hairstyle;
+			/*6c*/ uint32 face;
+			/*70*/ uint32 eyecolor1;
+			/*74*/ uint32 eyecolor2;
+			/*78*/ uint32 drakkin_heritage;
+			/*7c*/ uint32 drakkin_tattoo;
+			/*80*/ uint32 drakkin_details;
+			/*84*/ uint32 STR;
+			/*88*/ uint32 STA;
+			/*8c*/ uint32 AGI;
+			/*90*/ uint32 DEX;
+			/*94*/ uint32 WIS;
+			/*98*/ uint32 INT;
+			/*9c*/ uint32 CHA;
+			/*a0*/ uint32 tutorial;
+			/*a4*/ uint32 heroic_type;
+			/*a8*/
+		};
+
+		// OP_PersonaCreate and OP_PersonaSwitch (C2S)
+		struct PersonaRequest_Struct
+		{
+			/*00*/ uint32 target_class;
+			/*04*/ uint8 aa_purchasable;
+			/*05*/ uint8 auto_save_equipment_set;
+			/*06*/ uint32 current_class;
+			/*0a*/
+		};
+
+		// OP_PersonaCreate (S2C)
+		struct PersonaCreateApproval_Struct
+		{
+			/*00*/ uint32 class_id;
+			/*04*/ uint64 character_id;
+			/*0c*/ uint8 offer_now;
+			/*0d*/
+		};
+
+		struct EquipmentSetAction_Struct
+		{
+			/*00*/ uint32 action;
+			/*04*/ uint32 class_id;
+			/*08*/ uint16 unknown008;
+			/*0a*/
+		};
+
+		struct EquipmentKeyRingOption_Struct
+		{
+			/*00*/ uint8 store_equipment_sets;
+			/*01*/
+		};
+
+		struct EquipmentKeyRingState_Struct
+		{
+			/*00*/ uint32 capacity;
+			/*04*/ uint8 store_equipment_sets;
+			/*05*/
+		};
+
+		// OP_PersonaSwap, self form: header, spawn record (profile_end - 7 bytes), PersonaSwapProfile_Struct, inventory
+		struct PersonaSwapHeader_Struct
+		{
+			/*00*/ uint32 spawn_id;
+			/*04*/ uint8 self_flag;
+			/*05*/ uint16 profile_end; // offset of the profile block, counted from the start of the packet
+			/*07*/
+		};
+
+		struct PersonaSwapBind_Struct
+		{
+			/*00*/ uint32 zone_id;
+			/*04*/ float x;
+			/*08*/ float y;
+			/*0c*/ float z;
+			/*10*/ float heading;
+			/*14*/
+		};
+
+		struct PersonaSwapAA_Struct
+		{
+			/*00*/ uint32 aa_id;
+			/*04*/ uint32 value;
+			/*08*/ uint32 charges;
+			/*0c*/
+		};
+
+		// the client's PcProfile as OP_PersonaSwap carries it
+		struct PersonaSwapProfile_Struct
+		{
+			/*0000*/ uint8 unknown0000[0x0c];
+			/*000c*/ uint32 unknown000c;
+			/*0010*/ uint8 unknown0010[4];
+			/*0014*/ uint8 gender;
+			/*0015*/ uint8 unknown0015[3];
+			/*0018*/ uint32 race;
+			/*001c*/ uint32 class_;
+			/*0020*/ uint8 level;
+			/*0021*/ uint8 level2;
+			/*0022*/ uint8 unknown0022[2];
+			/*0024*/ PersonaSwapBind_Struct binds[5];
+			/*0088*/ uint32 deity;
+			/*008c*/ uint32 unknown008c;
+			/*0090*/ uint32 unknown0090[10];
+			/*00b8*/ uint8 unknown00b8[0x1b8]; // 22 armor properties
+			/*0270*/ uint8 unknown0270[0xb4]; // 9 base armor properties
+			/*0324*/ uint32 body_tint[9];
+			/*0348*/ uint32 equip_tint[9];
+			/*036c*/ uint8 haircolor;
+			/*036d*/ uint8 beardcolor;
+			/*036e*/ uint8 eyecolor1;
+			/*036f*/ uint8 eyecolor2;
+			/*0370*/ uint8 hairstyle;
+			/*0371*/ uint8 beard;
+			/*0372*/ uint8 face;
+			/*0373*/ uint8 unknown0373[9];
+			/*037c*/ uint32 drakkin_heritage;
+			/*0380*/ uint32 drakkin_tattoo;
+			/*0384*/ uint32 drakkin_details;
+			/*0388*/ uint8 unknown0388[0x28];
+			/*03b0*/ uint32 base_stats[7]; // STR STA CHA DEX INT AGI WIS, as OP_PlayerProfile
+			/*03cc*/ uint32 heroic_stats[7];
+			/*03e8*/ PersonaSwapAA_Struct aa[MAX_PP_AA_ARRAY];
+			/*11f8*/ uint32 skills[MAX_PP_SKILL];
+			/*1388*/ uint32 innate_skills[MAX_PP_INNATE_SKILL];
+			/*13ec*/ uint8 unknown13ec[0x4b0]; // name and title strings
+			/*189c*/ uint8 unknown189c[0xd8];
+			/*1974*/ uint32 unknown1974[100];
+			/*1b04*/ uint32 spell_book[1120];
+			/*2c84*/ uint32 mem_spells[18];
+			/*2ccc*/ uint32 spell_recast[15]; // timestamps
+			/*2d08*/ uint8 unknown2d08[8];
+			/*2d10*/ uint8 buffs[BUFF_COUNT * 0x98];
+			/*51e0*/ uint8 unknown51e0[0x58]; // hp, mana, endurance, experience
+			/*5238*/ uint8 unknown5238[20 * 0x140]; // bandolier sets
+			/*6b38*/ uint32 invslot_bitmask;            // worn slots the client lets the player use
+			/*6b3c*/ uint32 base_data[10];              // base hp, mana, endurance and resists, as OP_PlayerProfile
+			/*6b64*/ float walk_speed;
+			/*6b68*/ float run_speed;
+			/*6b6c*/ uint32 base_regen_and_combat[8];
+			/*6b8c*/ uint32 endurance;
+			/*6b90*/ uint32 heroic_type;
+			/*6b94*/ int16 keyring_item_index[18];
+			/*6bb8*/ uint64 exp;
+			/*6bc0*/ uint32 aa_exp;
+			/*6bc4*/ uint32 unknown6bc4;
+			/*6bc8*/
+		};
+
 		struct NameApproval_Struct {
 			char name[64];
 			uint32 race_id;
@@ -725,6 +886,21 @@ namespace TOB {
 			/*0012*/ InventorySlot_Struct	to_slot;
 			/*0024*/ uint32			number_in_stack;
 			/*0028*/
+		};
+
+		struct MultiMoveItemSub_Struct
+		{
+			/*0000*/ InventorySlot_Struct	from_slot;
+			/*0012*/ InventorySlot_Struct	to_slot;
+			/*0024*/ uint32			number_in_stack;
+			/*0028*/ uint8			unknown[8];
+			/*0036*/
+		};
+
+		struct MultiMoveItem_Struct
+		{
+			/*0000*/ uint32	count;
+			/*0004*/ MultiMoveItemSub_Struct moves[0];
 		};
 
 		struct ItemPreviewRequest_Struct
@@ -1429,13 +1605,26 @@ namespace TOB {
 
 		// OP_MercenaryTimer (S2C 0x6d3f). Handler inline in FUN_1402c71d0. SuspendedTime widened to 64 bits.
 		struct MercenaryStatus_Struct {
-		/*00*/	uint32	MercEntityID;
+		/*00*/	uint32	HasMerc;		// client reads the low byte only
 		/*04*/	uint32	UpdateInterval;
 		/*08*/	uint32	MercUnk01;
 		/*12*/	uint32	MercState;		// ToB enum: server 5 ("normal") == ToB 6
 		/*16*/	uint64	SuspendedTime;
 		/*24*/
 		};
+
+		// Merc list entry role (entry+0x44, FUN_1402ca2e0): the merchant row label is dbstr type 36 of this value
+		// (2 Tank, 3 Healer, 4 Caster DPS, 5 Melee DPS; FUN_140473c10).
+		enum MercListRole : uint32 {
+			MercListRoleNone         = 0,
+			MercListRoleTank         = 2,
+			MercListRoleHealer       = 3,
+			MercListRoleMeleeDamage  = 5,
+			MercListRoleCasterDamage = 4
+		};
+
+		// OP_MercenaryDataUpdate trailing field (client +0x24c); Live sends 7, the client defaults to 0xb.
+		const uint32 MERC_DATA_UPDATE_TRAILER = 7;
 
 		// OP_MercenarySuspendResponse (S2C 0x1e9b). Client reads *(u64*)p.
 		struct SuspendMercenaryResponse_Struct {
@@ -2691,6 +2880,67 @@ namespace TOB {
 		/*100*/ char   item_text[1024];
 		/*1124*/ char  extra_text[1];
 		/*1125*/
+	};
+
+	// Fellowship window (OP_FellowshipUpdate, OP_FellowshipAction, OP_FellowshipInvite, campfire list request)
+	struct FellowshipMember_Struct {
+		/*000*/ EqGuid guid;            // {character_id, world_id, 0}
+		/*008*/ char   name[64];
+		/*072*/ uint32 zone;            // zone_id | instance_id << 16, 0 while zoning or offline
+		/*076*/ uint32 level;
+		/*080*/ uint32 class_;
+		/*084*/ uint32 last_on;
+		/*088*/
+	};
+
+	struct FellowshipCampsite_Struct {
+		/*000*/ float  x;
+		/*004*/ float  y;
+		/*008*/ float  z;
+		/*012*/ uint32 zone;            // zone_id | instance_id << 16
+		/*016*/ uint32 expires_at;      // non-zero = a campsite exists
+		/*020*/ uint32 unknown020;
+		/*024*/ EqGuid fellowship_id;
+		/*032*/ uint32 campfire_type;
+		/*036*/ uint32 is_present;      // 1 with a campsite
+		/*040*/
+	};
+
+	struct FellowshipUpdate_Struct {
+		/*0000*/ uint8  offline_mode[12];
+		/*0012*/ uint32 unknown012;
+		/*0016*/ EqGuid fellowship_id;  // {id, world_id, 0}
+		/*0024*/ char   motd[1024];
+		/*1048*/ uint32 member_count;
+		/*1052*/ uint32 unknown1052;
+		/*1056*/ FellowshipMember_Struct members[12];
+		/*2112*/ uint32 now;
+		/*2116*/ uint8  exp_sharing[12];
+		/*2128*/ uint8  exp_capped[12];
+		/*2140*/ uint32 unknown2140;    // 120 in every capture; never read
+		/*2144*/ FellowshipCampsite_Struct campsite;
+		/*2184*/
+	};
+
+	struct FellowshipAction_Struct {    // C2S; OP_FellowshipInvite S2C has the same layout
+		/*0000*/ uint32 action;
+		/*0004*/ uint32 unknown004;
+		/*0008*/ EqGuid target_guid;
+		/*0016*/ uint8  unknown016[8];
+		/*0024*/ EqGuid inviter_guid;    // S2C invite only
+		/*0032*/ EqGuid fellowship_guid; // action 12 (C2S) and the invite (S2C)
+		/*0040*/ char   text[1024];      // action 2
+		/*1064*/ uint8  unknown1064[20];
+		/*1084*/ uint32 campfire_type;   // action 8
+		/*1088*/ uint8  unknown1088[8];
+		/*1096*/
+	};
+
+	struct FellowshipCampfireListRequest_Struct {
+		/*00*/ uint8 only_usable;
+		/*01*/ uint8 unknown01[3];
+		/*04*/ int32 category;          // -1 = all
+		/*08*/
 	};
 
 	// the client builds the heal chat line itself and shows "healed (total)" when the two differ

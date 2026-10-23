@@ -45,6 +45,8 @@ set(zone_sources
 	expedition_request.cpp
 	fastmath.cpp
 	fearpath.cpp
+	fellowship.cpp
+	fellowship_manager.cpp
 	forage.cpp
 	global_loot_manager.cpp
 	groups.cpp
@@ -60,6 +62,7 @@ set(zone_sources
 	map.cpp
 	marketplace.cpp
 	merc.cpp
+	merc_equipment.cpp
 	mob.cpp
 	mob_ai.cpp
 	mob_appearance.cpp
@@ -75,6 +78,7 @@ set(zone_sources
 	pathfinder_nav_mesh.cpp
 	pathfinder_null.cpp
 	pathing.cpp
+	persona.cpp
 	petitions.cpp
 	pets.cpp
 	position.cpp
@@ -153,6 +157,7 @@ set(zone_headers
 	event_codes.h
 	expedition_request.h
 	fastmath.h
+	fellowship_manager.h
 	forage.h
 	global_loot_manager.h
 	groups.h
@@ -479,6 +484,7 @@ set(gm_command_sources
 	gm_commands/makepet.cpp
 	gm_commands/marketplacecoins.cpp
 	gm_commands/memspell.cpp
+	gm_commands/merc.cpp
 	gm_commands/merchantshop.cpp
 	gm_commands/modifynpcstat.cpp
 	gm_commands/movechar.cpp
@@ -503,6 +509,7 @@ set(gm_command_sources
 	gm_commands/parcels.cpp
 	gm_commands/path.cpp
 	gm_commands/peqzone.cpp
+	gm_commands/persona.cpp
 	gm_commands/petitems.cpp
 	gm_commands/petname.cpp
 	gm_commands/picklock.cpp

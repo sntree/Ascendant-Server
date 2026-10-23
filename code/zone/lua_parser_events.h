@@ -959,6 +959,24 @@ void handle_player_achievement_complete(
 	std::vector<std::any> *extra_pointers
 );
 
+void handle_player_persona_create(
+	QuestInterface *parse,
+	lua_State* L,
+	Client* client,
+	std::string data,
+	uint32 extra_data,
+	std::vector<std::any> *extra_pointers
+);
+
+void handle_player_persona_switch(
+	QuestInterface *parse,
+	lua_State* L,
+	Client* client,
+	std::string data,
+	uint32 extra_data,
+	std::vector<std::any> *extra_pointers
+);
+
 // Item
 void handle_item_click(
 	QuestInterface *parse,

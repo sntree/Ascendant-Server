@@ -2,6 +2,18 @@ local started = false;
 local completed = false
 local count = 0;
 
+-- Ascendant: the real hint goes to everyone in the chamber (was one random client anywhere in the
+-- zone, plus a misleading either/or hint to another random client)
+function send_key_hint(e, key_name)
+	local clients = eq.get_entity_list():GetClientList();
+	for c in clients.entries do
+		if c.valid and c:CalculateDistance(e.self:GetX(), e.self:GetY(), e.self:GetZ()) <= 75 then
+			c:Message(MT.Yellow, "Out of the corner of your eye you perceive movement. Within the recession on the door a mechanical lock rotated counter-clockwise. It was visible for only a fraction of a second, but that was long enough to make an educated guess to which key it now accepts.");
+			c:Message(MT.Yellow, "The " .. key_name .. " Key must unlock the door to the next room.");
+		end
+	end
+end
+
 function event_spawn(e)
 	local instance_id = eq.get_zone_instance_id();
 	local qglobals = eq.get_qglobals(e.self); 
@@ -15,8 +27,6 @@ end
 function event_timer(e)
 	local instance_id = eq.get_zone_instance_id();
 	local qglobals = eq.get_qglobals(e.self);
-	local emote_pc_1 = eq.get_entity_list():GetRandomClient(e.self:GetX(),e.self:GetY(),e.self:GetZ(),300*300); -- Real Emote
-	local emote_pc_2 = eq.get_entity_list():GetRandomClient(e.self:GetX(),e.self:GetY(),e.self:GetZ(),300*300); -- Fake Emote
 	local rand_emote = math.random(1,4); 
 
 	if e.timer == "gaschamber" then
@@ -25,44 +35,16 @@ function event_timer(e)
 		eq.zone_emote(MT.White,"From somewhere behind the walls there is a deep rumbling.");
 
 		if rand_emote == 1 then
-			if emote_pc_1.valid then
-				emote_pc_1:Message(MT.Yellow,"Out of the corner of your eye you perceive movement. Within the recession on the door a mechanical lock rotated counter-clockwise. It was visible for only a fraction of a second, but that was long enough to make an educated guess to which key it now accepts.")
-				emote_pc_1:Message(MT.Yellow,"The Cracked Key must unlock the door to the next room.")
-			end
-			if emote_pc_2.valid then
-				emote_pc_2:Message(MT.Yellow,"Amidst the ambient noise of grinding stone, your sharp hearing picks up the sound of several gears rotating into place. The pattern of repetitive clicks suddenly makes sense.")
-				emote_pc_2:Message(MT.Yellow,"It must be either the Cracked Key or Dusty Key that unlocks the door to the next room.")
-			end
+			send_key_hint(e, "Cracked");
 			eq.set_global(instance_id.."_gaschmb1","67707",3,"M5");
 		elseif rand_emote == 2 then
-			if emote_pc_1.valid then
-				emote_pc_1:Message(MT.Yellow,"Out of the corner of your eye you perceive movement. Within the recession on the door a mechanical lock rotated counter-clockwise. It was visible for only a fraction of a second, but that was long enough to make an educated guess to which key it now accepts.")
-				emote_pc_1:Message(MT.Yellow,"The Dusty Key must unlock the door to the next room.")
-			end
-			if emote_pc_2.valid then
-				emote_pc_2:Message(MT.Yellow,"Amidst the ambient noise of grinding stone, your sharp hearing picks up the sound of several gears rotating into place. The pattern of repetitive clicks suddenly makes sense.")
-				emote_pc_2:Message(MT.Yellow,"It must be either the Polished Key or Dusty Key that unlocks the door to the next room.")
-			end
+			send_key_hint(e, "Dusty");
 			eq.set_global(instance_id.."_gaschmb1","67708",3,"M5");
 		elseif rand_emote == 3 then
-			if emote_pc_1.valid then
-				emote_pc_1:Message(MT.Yellow,"Out of the corner of your eye you perceive movement. Within the recession on the door a mechanical lock rotated counter-clockwise. It was visible for only a fraction of a second, but that was long enough to make an educated guess to which key it now accepts.")
-				emote_pc_1:Message(MT.Yellow,"The Polished Key must unlock the door to the next room.")
-			end
-			if emote_pc_2.valid then
-				emote_pc_2:Message(MT.Yellow,"Amidst the ambient noise of grinding stone, your sharp hearing picks up the sound of several gears rotating into place. The pattern of repetitive clicks suddenly makes sense.")
-				emote_pc_2:Message(MT.Yellow,"It must be either the Cracked Key or Jagged Key that unlocks the door to the next room.")
-			end
+			send_key_hint(e, "Polished");
 			eq.set_global(instance_id.."_gaschmb1","67709",3,"M5");
 		elseif rand_emote == 4 then
-			if emote_pc_1.valid then
-				emote_pc_1:Message(MT.Yellow,"Out of the corner of your eye you perceive movement. Within the recession on the door a mechanical lock rotated counter-clockwise. It was visible for only a fraction of a second, but that was long enough to make an educated guess to which key it now accepts.")
-				emote_pc_1:Message(MT.Yellow,"The Jagged Key must unlock the door to the next room.")
-			end
-			if emote_pc_2.valid then
-				emote_pc_2:Message(MT.Yellow,"Amidst the ambient noise of grinding stone, your sharp hearing picks up the sound of several gears rotating into place. The pattern of repetitive clicks suddenly makes sense.")
-				emote_pc_2:Message(MT.Yellow,"It must be either the Cracked Key or Polished Key that unlocks the door to the next room.")
-			end
+			send_key_hint(e, "Jagged");
 			eq.set_global(instance_id.."_gaschmb1","67710",3,"M5");
 		end
 		if count == 99 then -- Wipe

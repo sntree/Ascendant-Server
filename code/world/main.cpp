@@ -30,6 +30,7 @@
 #include "common/net/eqstream.h"
 #include "common/patches/patches.h"
 #include "common/path_manager.h"
+#include "common/persona.h"
 #include "common/platform.h"
 #include "common/repositories/character_expedition_lockouts_repository.h"
 #include "common/repositories/character_task_timers_repository.h"
@@ -42,6 +43,7 @@
 #include "world/clientlist.h"
 #include "world/console.h"
 #include "world/dynamic_zone_manager.h"
+#include "world/fellowship_manager.h"
 #include "world/launcher_list.h"
 #include "world/lfplist.h"
 #include "world/login_server.h"
@@ -132,6 +134,8 @@ int main(int argc, char **argv)
 		return 1;
 	}
 
+	Persona::CheckStorageEngines(database);
+
 	// timers
 	Timer PurgeInstanceTimer(450000);
 	PurgeInstanceTimer.Start(450000);
@@ -170,6 +174,9 @@ int main(int argc, char **argv)
 	if (RuleB(Character, EnableMarketplace)) {
 		Marketplace::Instance()->LoadOffers();
 	}
+
+	WorldFellowshipManager::Instance()->SetDatabase(&database)->LoadFellowships();
+	WorldFellowshipManager::Instance()->RepairAfterLoad();
 
 	std::unique_ptr<EQ::Net::ServertalkServer> server_connection;
 	server_connection = std::make_unique<EQ::Net::ServertalkServer>();
@@ -395,6 +402,7 @@ int main(int argc, char **argv)
 
 		ClientList::Instance()->Process();
 		guild_mgr.Process();
+		WorldFellowshipManager::Instance()->Process();
 
 		if (parcel_prune_timer.Check()) {
 			if (RuleB(Parcel, EnableParcelMerchants) && RuleB(Parcel, EnablePruning)) {

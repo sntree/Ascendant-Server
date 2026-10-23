@@ -24,10 +24,12 @@ Copyright (C) 2001-2026 EQEmu Development Team
 #include "common/global_define.h"
 #include "common/eqemu_config.h"
 #include "common/eqemu_logsys.h"
+#include "common/fellowship.h"
 #include "common/opcodemgr.h"
 
 #include "common/eq_stream_ident.h"
 #include "common/crc32.h"
+#include "common/data_verification.h"
 
 #include "common/eq_packet_structs.h"
 #include "common/links.h"
@@ -49,6 +51,7 @@ Copyright (C) 2001-2026 EQEmu Development Team
 #include <numeric>
 #include <cassert>
 #include <cinttypes>
+#include <limits>
 #include <set>
 
 namespace TOB
@@ -58,6 +61,8 @@ namespace TOB
 	static Strategy struct_strategy;
 
 	void SerializeItem(SerializeBuffer &buffer, const EQ::ItemInstance* inst, int16 slot_id, uint8 depth, ItemPacketType packet_type, bool live = false);
+	static void SerializeSpawn(SerializeBuffer& buffer, Spawn_Struct* emu, bool live);
+	static void SerializeInventory(SerializeBuffer& buffer, const EQ::InternalSerializedItem_Struct* items, uint32 item_count, bool live);
 
 	// message link converters
 	static void ServerToTOBConvertLinks(std::string& message_out, const std::string& message_in, bool client_tags_brackets = true);
@@ -75,6 +80,8 @@ namespace TOB
 
 	// client to server inventory location converters
 	static inline uint32 TOBToServerSlot(structs::InventorySlot_Struct tob_slot);
+	static inline uint32 TOBToServerMoveSlot(const structs::InventorySlot_Struct &tob_slot);
+	static inline ::InventorySlot_Struct ServerToEmuTypedSlot(uint32 server_slot);
 	static inline uint32 TOBToServerCorpseSlot(structs::InventorySlot_Struct tob_corpse_slot);
 	static inline uint32 TOBToServerCorpseMainSlot(uint32 tob_corpse_slot);
 	static inline uint32 TOBToServerTypelessSlot(structs::TypelessInventorySlot_Struct tob_slot, int16 tob_type);
@@ -92,6 +99,37 @@ namespace TOB
 		}
 
 		return std::clamp(RuleI(Character, KeyRingSlots), 0, static_cast<int>(EQ::invslot::KEYRING_CLIENT_SIZE[ring]));
+	}
+
+	// Expansion flags sent in the profile. The client's usable shared bank slots come only from these bits (eqgame
+	// #630 0x1402da830: 2 without CotF, 4 with it, 6 with TBL as well), so the bits are cleared down to the server's
+	// shared bank size. The only other reader is the AA purchase check, see TOBAAExpansion.
+	static constexpr uint64 TOBExpansionFlags()
+	{
+		constexpr uint64 all_expansions = 0x3FFFFFFF;
+		constexpr uint64 cotf_bit       = 1ULL << 19;
+		constexpr uint64 tbl_bit        = 1ULL << 24;
+
+		if (EQ::invtype::SHARED_BANK_SIZE < 4) {
+			return all_expansions & ~cotf_bit;
+		}
+
+		if (EQ::invtype::SHARED_BANK_SIZE < 6) {
+			return all_expansions & ~tbl_bit;
+		}
+
+		return all_expansions;
+	}
+
+	// AA expansion the client checks against the profile flags (0x1401a8d30); an AA from an expansion cleared there
+	// is sent with no expansion so it stays purchasable (the server still checks the expansion on purchase)
+	static constexpr int32 TOBAAExpansion(int32 expansion)
+	{
+		if (expansion > 0 && expansion <= 64 && (TOBExpansionFlags() & (1ULL << (expansion - 1))) == 0) {
+			return 0;
+		}
+
+		return expansion;
 	}
 
 	// Store-feature claims the client checks before a key ring takes an item (eqgame #630 PcClient vtable+0x130,
@@ -987,6 +1025,15 @@ namespace TOB
 		dest->FastQueuePacket(&in, ack_req);
 	}
 
+	static void SerializeInventory(SerializeBuffer& buffer, const EQ::InternalSerializedItem_Struct* items, uint32 item_count, bool live)
+	{
+		buffer.WriteUInt32(item_count);
+
+		for (uint32 index = 0; index < item_count; ++index) {
+			SerializeItem(buffer, (const EQ::ItemInstance*)items[index].inst, items[index].slot_id, 0, ItemPacketCharInventory, live);
+		}
+	}
+
 	ENCODE(OP_CharInventory) {
 		//consume the packet
 		EQApplicationPacket* in = *p;
@@ -1015,11 +1062,7 @@ namespace TOB
 
 		EQ::InternalSerializedItem_Struct* eq = (EQ::InternalSerializedItem_Struct*)in->pBuffer;
 		SerializeBuffer buffer;
-		buffer.WriteUInt32(item_count);
-
-		for (int index = 0; index < item_count; ++index, ++eq) {
-			SerializeItem(buffer, (const EQ::ItemInstance*)eq->inst, eq->slot_id, 0, ItemPacketCharInventory, Live::IsLiveStream(dest));
-		}
+		SerializeInventory(buffer, eq, item_count, Live::IsLiveStream(dest));
 
 		in->size = buffer.size();
 		in->pBuffer = new unsigned char[buffer.size()];
@@ -1318,6 +1361,51 @@ namespace TOB
 		}
 	}
 
+	ENCODE(OP_EquipmentKeyRingOption)
+	{
+		EQApplicationPacket *in = *p;
+		*p = nullptr;
+
+		if (in->size != sizeof(EquipmentKeyRingState_Struct)) {
+			LogNetcode("[STRUCTS] Wrong size on outbound [{}]: Got [{}], expected [{}]", opcodes->EmuToName(in->GetOpcode()), in->size, sizeof(EquipmentKeyRingState_Struct));
+			delete in;
+			return;
+		}
+
+		const auto emu   = reinterpret_cast<EquipmentKeyRingState_Struct *>(in->pBuffer);
+		const uint16 count = std::min<uint16>(emu->owner_count, static_cast<uint16>(std::size(emu->owners)));
+
+		// {u32 capacity; u8 store; u16 count; count x {u16 index; u8 class; u8 name length; name}}: class 0 and the
+		// owning classes as a label ("MNK | WIZ"), since an item can belong to several personas' sets
+		SerializeBuffer buffer;
+		buffer.WriteUInt32(emu->capacity);
+		buffer.WriteUInt8(emu->store_equipment_sets);
+		buffer.WriteUInt16(count);
+		for (uint16 i = 0; i < count; ++i) {
+			std::vector<std::string> classes;
+			for (uint8 class_id = Class::Warrior; class_id <= Class::Berserker; ++class_id) {
+				if (emu->owners[i].class_mask & (1 << (class_id - 1))) {
+					classes.push_back(GetPlayerClassAbbreviation(class_id));
+				}
+			}
+
+			const std::string label = Strings::Join(classes, " | ");
+			buffer.WriteUInt16(emu->owners[i].index);
+			buffer.WriteUInt8(0);
+			buffer.WriteUInt8(static_cast<uint8>(label.size()));
+			for (const char c : label) {
+				buffer.WriteInt8(c);
+			}
+		}
+
+		delete[] in->pBuffer;
+		in->size    = buffer.size();
+		in->pBuffer = new unsigned char[buffer.size()];
+		memcpy(in->pBuffer, buffer.buffer(), buffer.size());
+
+		dest->FastQueuePacket(&in, ack_req);
+	}
+
 	ENCODE(OP_ExpansionInfo)
 	{
 		ENCODE_LENGTH_EXACT(ExpansionInfo_Struct);
@@ -1335,6 +1423,106 @@ namespace TOB
 		//later we should change the underlying server to use this more accurate value
 		//and encode the 330 in the other patches
 		eq->exp = emu->exp * 100000 / 330;
+
+		FINISH_ENCODE();
+	}
+
+	namespace {
+		// Live always sends it; the client never reads it
+		constexpr uint32 FellowshipUpdateUnknown2140 = 120;
+	}
+
+	ENCODE(OP_FellowshipCampfireList)
+	{
+		EQApplicationPacket *in = *p;
+		*p = nullptr;
+
+		const auto emu      = reinterpret_cast<const FellowshipCampfireList_Struct *>(in->pBuffer);
+		const bool has_head = in->size >= sizeof(FellowshipCampfireList_Struct);
+		if (!has_head || in->size != sizeof(FellowshipCampfireList_Struct) + emu->count * sizeof(FellowshipCampfireListEntry_Struct)) {
+			LogNetcode("TOB::ENCODE(OP_FellowshipCampfireList) wrong size [{}]", in->size);
+			delete in;
+			return;
+		}
+
+		SerializeBuffer buffer;
+		buffer.WriteUInt32(emu->count);
+		for (uint32 index = 0; index < emu->count; ++index) {
+			const auto &entry = emu->entries[index];
+
+			buffer.WriteUInt8(entry.is_usable);
+			buffer.WriteUInt32(entry.campfire_type);
+			buffer.WriteUInt32(entry.description_id);
+			buffer.WriteString(std::string(entry.name, strnlen(entry.name, sizeof(entry.name))));
+		}
+
+		auto outapp = new EQApplicationPacket(OP_FellowshipCampfireList, buffer.size());
+		outapp->WriteData(buffer.buffer(), buffer.size());
+		dest->FastQueuePacket(&outapp, ack_req);
+
+		delete in;
+	}
+
+	ENCODE(OP_FellowshipInvite)
+	{
+		ENCODE_LENGTH_EXACT(FellowshipInvite_Struct);
+		SETUP_DIRECT_ENCODE(FellowshipInvite_Struct, structs::FellowshipAction_Struct);
+
+		eq->action                  = FellowshipInvite;
+		eq->target_guid.Id          = emu->target_character_id;
+		eq->target_guid.WorldId     = RuleI(World, Id);
+		eq->inviter_guid.Id         = emu->inviter_character_id;
+		eq->inviter_guid.WorldId    = RuleI(World, Id);
+		eq->fellowship_guid.Id      = emu->fellowship_id;
+		eq->fellowship_guid.WorldId = RuleI(World, Id);
+
+		FINISH_ENCODE();
+	}
+
+	ENCODE(OP_FellowshipUpdate)
+	{
+		ENCODE_LENGTH_EXACT(FellowshipUpdate_Struct);
+		SETUP_DIRECT_ENCODE(FellowshipUpdate_Struct, structs::FellowshipUpdate_Struct);
+
+		eq->fellowship_id.Id      = emu->fellowship_id;
+		eq->fellowship_id.WorldId = RuleI(World, Id);
+		strn0cpy(eq->motd, emu->motd, sizeof(eq->motd));
+
+		const uint32 count = std::min<uint32>(emu->member_count, Fellowship::MAX_MEMBERS);
+		eq->member_count   = count;
+		for (uint32 i = 0; i < count; ++i) {
+			const auto &member = emu->members[i];
+			auto       &out    = eq->members[i];
+
+			out.guid.Id      = member.character_id;
+			out.guid.WorldId = RuleI(World, Id);
+			strn0cpy(out.name, member.name, sizeof(out.name));
+			out.zone    = member.zone_id | (static_cast<uint32>(member.instance_id) << 16);
+			out.level   = member.level;
+			out.class_  = member.class_;
+			out.last_on = member.last_on;
+
+			eq->exp_sharing[i]  = member.is_exp_sharing;
+			eq->exp_capped[i]   = member.is_exp_capped;
+			eq->offline_mode[i] = member.is_offline_mode;
+		}
+
+		eq->now         = static_cast<uint32>(time(nullptr));
+		eq->unknown2140 = FellowshipUpdateUnknown2140;
+
+		if (emu->campsite.expires_at != 0) {
+			auto &campsite = eq->campsite;
+
+			campsite.x                     = emu->campsite.x;
+			campsite.y                     = emu->campsite.y;
+			campsite.z                     = emu->campsite.z;
+			campsite.zone                  = emu->campsite.zone_id | (static_cast<uint32>(emu->campsite.instance_id) << 16);
+			campsite.expires_at            = emu->campsite.expires_at;
+			campsite.fellowship_id.Id      = emu->fellowship_id;
+			campsite.fellowship_id.WorldId = RuleI(World, Id);
+			campsite.campfire_type         = emu->campsite.campfire_type;
+			campsite.is_present            = 1;
+		}
 
 		FINISH_ENCODE();
 	}
@@ -1632,13 +1820,14 @@ namespace TOB
 
 		if (in->size == sizeof(GroupUpdate2_Struct)) {
 			auto gu2 = (GroupUpdate2_Struct*)in->pBuffer;
-			// fixed bytes per member besides the name: 4 + 2 + 1 (empty owner) + 4 + 5 + 4 + 8 + 4 + 8 = 40
+			// fixed bytes per member besides the name and merc owner: 4 + 2 + 1 (owner terminator) + 4 + 5 + 4 + 8 + 4 + 8 = 40
 			const uint32 per_member = 40;
 			int member_count = 1;
 			uint32 packet_length = 8 + strlen(gu2->leadersname) + 1 + per_member + strlen(gu2->yourname) + 1;
 			for (int i = 0; i < 5; ++i) {
 				if (gu2->membername[i][0] != '\0') {
-					packet_length += per_member + strlen(gu2->membername[i]) + 1;
+					packet_length += per_member + strlen(gu2->membername[i]) + 1 +
+						strnlen(gu2->member_merc_owner[i], sizeof(gu2->member_merc_owner[i]) - 1);
 					++member_count;
 				}
 			}
@@ -1650,11 +1839,15 @@ namespace TOB
 			VARSTRUCT_ENCODE_TYPE(uint32, buffer, member_count);
 			VARSTRUCT_ENCODE_STRING(buffer, gu2->leadersname);
 
-			auto write_member = [&buffer](uint32 index, const char* name, uint32 level) {
+			// a merc row carries its owner; the client (Advanced Loot, group window) treats it as a merc only then
+			auto write_member = [&buffer](uint32 index, const char* name, uint32 level, const char* merc_owner, size_t owner_max) {
+				const size_t owner_len = merc_owner ? strnlen(merc_owner, owner_max - 1) : 0;
 				VARSTRUCT_ENCODE_TYPE(uint32, buffer, index);
 				VARSTRUCT_ENCODE_STRING(buffer, name);
-				VARSTRUCT_ENCODE_TYPE(uint16, buffer, 0);  // merc flag
-				VARSTRUCT_ENCODE_TYPE(uint8, buffer, 0);   // merc owner name (empty string)
+				VARSTRUCT_ENCODE_TYPE(uint16, buffer, owner_len ? 1 : 0);  // merc flag
+				memcpy(buffer, merc_owner ? merc_owner : "", owner_len);
+				buffer += owner_len;
+				VARSTRUCT_ENCODE_TYPE(uint8, buffer, 0);   // merc owner name terminator
 				VARSTRUCT_ENCODE_TYPE(uint32, buffer, level);
 				for (int r = 0; r < 5; ++r)
 					VARSTRUCT_ENCODE_TYPE(uint8, buffer, 0); // role flags (tank, assist, puller, +2 new in ToB)
@@ -1664,12 +1857,12 @@ namespace TOB
 				VARSTRUCT_ENCODE_TYPE(uint64, buffer, 0);  // unknown
 			};
 
-			write_member(0, gu2->yourname, 0x46);
+			write_member(0, gu2->yourname, 0x46, nullptr, 0);
 			uint32 member_number = 1;
 			for (int i = 0; i < 5; ++i) {
 				if (gu2->membername[i][0] == '\0')
 					continue;
-				write_member(member_number++, gu2->membername[i], 0x41);
+				write_member(member_number++, gu2->membername[i], 0x41, gu2->member_merc_owner[i], sizeof(gu2->member_merc_owner[i]));
 			}
 
 			dest->FastQueuePacket(&outapp);
@@ -2804,6 +2997,197 @@ namespace TOB
 		delete in;
 	}
 
+	ENCODE(OP_PersonaClassList)
+	{
+		ENCODE_LENGTH_EXACT(PersonaClassList_Struct);
+		EQApplicationPacket* in = *p;
+		*p = nullptr;
+
+		auto emu = reinterpret_cast<PersonaClassList_Struct*>(in->pBuffer);
+		const uint32 listed = std::min<uint32>(emu->count, Class::PLAYER_CLASS_COUNT);
+
+		// the client treats a missing class or level 0 as not owned, so only owned classes are sent
+		uint32 owned = 0;
+		for (uint32 i = 0; i < listed; ++i) {
+			if (emu->entries[i].class_id != 0 && emu->entries[i].level != 0) {
+				++owned;
+			}
+		}
+
+		SerializeBuffer buffer;
+		buffer.WriteUInt32(owned);
+		for (uint32 i = 0; i < listed; ++i) {
+			if (emu->entries[i].class_id == 0 || emu->entries[i].level == 0) {
+				continue;
+			}
+
+			buffer.WriteUInt32(emu->entries[i].class_id);
+			buffer.WriteUInt32(emu->entries[i].level);
+		}
+
+		auto outapp = new EQApplicationPacket(OP_PersonaClassList, buffer.size());
+		outapp->WriteData(buffer.buffer(), buffer.size());
+		dest->FastQueuePacket(&outapp, ack_req);
+
+		delete in;
+	}
+
+	ENCODE(OP_PersonaCreate)
+	{
+		ENCODE_LENGTH_EXACT(PersonaCreateApproval_Struct);
+		SETUP_DIRECT_ENCODE(PersonaCreateApproval_Struct, structs::PersonaCreateApproval_Struct);
+
+		OUT(class_id);
+		OUT(character_id);
+		OUT(offer_now);
+
+		FINISH_ENCODE();
+	}
+
+	// 1 makes the client apply the whole profile block; 0 makes it rebuild spells and AAs from the packets that follow
+	static constexpr uint8 TOB_PERSONA_SWAP_SELF_FLAG = 1;
+
+	// Values are converted the way OP_PlayerProfile converts them. Regions not mapped yet stay zero.
+	static void FillPersonaSwapProfile(structs::PersonaSwapProfile_Struct& block, const PlayerProfile_Struct& profile)
+	{
+		// OP_PlayerProfile only sends this many AA entries from the emu table
+		constexpr uint32 profile_aa_count = 240;
+
+		block.gender = static_cast<uint8>(profile.gender);
+		block.race = profile.race;
+		block.class_ = profile.class_;
+		block.level = static_cast<uint8>(profile.level);
+		block.level2 = static_cast<uint8>(profile.level);
+
+		for (size_t i = 0; i < std::size(block.binds); ++i) {
+			block.binds[i].zone_id = profile.binds[i].zone_id;
+			block.binds[i].x = profile.binds[i].x;
+			block.binds[i].y = profile.binds[i].y;
+			block.binds[i].z = profile.binds[i].z;
+			block.binds[i].heading = profile.binds[i].heading;
+		}
+
+		block.deity = profile.deity;
+
+		for (size_t i = 0; i < std::size(block.body_tint); ++i) {
+			const uint32 tint = i < EQ::textures::materialCount ? profile.item_tint.Slot[i].Color : 0;
+			block.body_tint[i] = tint;
+			block.equip_tint[i] = tint;
+		}
+
+		block.haircolor = profile.haircolor;
+		block.beardcolor = profile.beardcolor;
+		block.eyecolor1 = profile.eyecolor1;
+		block.eyecolor2 = profile.eyecolor2;
+		block.hairstyle = profile.hairstyle;
+		block.beard = profile.beard;
+		block.face = profile.face;
+		block.drakkin_heritage = profile.drakkin_heritage;
+		block.drakkin_tattoo = profile.drakkin_tattoo;
+		block.drakkin_details = profile.drakkin_details;
+
+		block.base_stats[0] = profile.STR;
+		block.base_stats[1] = profile.STA;
+		block.base_stats[2] = profile.CHA;
+		block.base_stats[3] = profile.DEX;
+		block.base_stats[4] = profile.INT;
+		block.base_stats[5] = profile.AGI;
+		block.base_stats[6] = profile.WIS;
+
+		for (uint32 i = 0; i < profile_aa_count; ++i) {
+			block.aa[i].aa_id = profile.aa_array[i].AA;
+			block.aa[i].value = profile.aa_array[i].value;
+			block.aa[i].charges = profile.aa_array[i].charges;
+		}
+
+		for (size_t i = 0; i < std::size(block.skills); ++i) {
+			block.skills[i] = profile.skills[i];
+		}
+
+		for (size_t i = 0; i < std::size(block.innate_skills); ++i) {
+			block.innate_skills[i] = profile.InnateSkills[i];
+		}
+
+		// slots past the emu book and gems are empty
+		for (size_t i = 0; i < std::size(block.spell_book); ++i) {
+			block.spell_book[i] = i < EQ::spells::SPELLBOOK_SIZE ? static_cast<uint32>(profile.spell_book[i]) : 0xFFFFFFFF;
+		}
+
+		for (size_t i = 0; i < std::size(block.mem_spells); ++i) {
+			block.mem_spells[i] = i < EQ::spells::SPELL_GEM_COUNT ? profile.mem_spells[i] : 0xFFFFFFFF;
+		}
+
+		for (size_t i = 0; i < std::size(block.spell_recast) && i < EQ::spells::SPELL_GEM_COUNT; ++i) {
+			block.spell_recast[i] = profile.spellSlotRefresh[i];
+		}
+
+		// the same values ENCODE(OP_PlayerProfile) sends; a zero slot mask makes the client disable every worn slot
+		constexpr uint32 BASE_DATA[] = { 5, 5, 5, 25, 25, 25, 15, 15, 15, 15 };
+		block.invslot_bitmask = 0xFFFFFFFF;
+		std::copy(std::begin(BASE_DATA), std::end(BASE_DATA), std::begin(block.base_data));
+		block.walk_speed = 0.46f;
+		block.run_speed  = 0.7f;
+		block.endurance  = profile.endurance;
+		std::fill(std::begin(block.keyring_item_index), std::end(block.keyring_item_index), -1);
+		block.exp    = profile.exp;
+		block.aa_exp = profile.expAA;
+	}
+
+	ENCODE(OP_PersonaSwap)
+	{
+		ENCODE_LENGTH_ATLEAST(PersonaSwap_Struct);
+		EQApplicationPacket* in = *p;
+		*p = nullptr;
+
+		if (Live::IsLiveStream(dest)) {
+			LogNetcode("[STRUCTS] Dropped outbound [{}] on a Live stream: the profile block layout is unverified", opcodes->EmuToName(in->GetOpcode()));
+			delete in;
+			return;
+		}
+
+		auto emu = reinterpret_cast<PersonaSwap_Struct*>(in->pBuffer);
+		const size_t expected_size = sizeof(PersonaSwap_Struct) + static_cast<size_t>(emu->item_count) * sizeof(EQ::InternalSerializedItem_Struct);
+		if (in->size != expected_size) {
+			LogNetcode("[STRUCTS] Wrong size on outbound [{}]: Got [{}], expected [{}]", opcodes->EmuToName(in->GetOpcode()), in->size, expected_size);
+			delete in;
+			return;
+		}
+
+		auto items = reinterpret_cast<const EQ::InternalSerializedItem_Struct*>(in->pBuffer + sizeof(PersonaSwap_Struct));
+
+		SerializeBuffer spawn_buffer;
+		SerializeSpawn(spawn_buffer, &emu->spawn, false);
+
+		// the client parses the spawn record up to profile_end and must consume exactly that many bytes
+		const size_t profile_end = sizeof(structs::PersonaSwapHeader_Struct) + spawn_buffer.size();
+		if (profile_end > std::numeric_limits<uint16>::max()) {
+			LogNetcode("[STRUCTS] Dropped outbound [{}]: spawn record of [{}] bytes does not fit the header", opcodes->EmuToName(in->GetOpcode()), spawn_buffer.size());
+			delete in;
+			return;
+		}
+
+		structs::PersonaSwapHeader_Struct header{};
+		header.spawn_id = emu->spawn_id;
+		header.self_flag = TOB_PERSONA_SWAP_SELF_FLAG;
+		header.profile_end = static_cast<uint16>(profile_end);
+
+		auto block = std::make_unique<structs::PersonaSwapProfile_Struct>();
+		FillPersonaSwapProfile(*block, emu->profile);
+
+		SerializeBuffer inventory_buffer;
+		SerializeInventory(inventory_buffer, items, emu->item_count, false);
+
+		const size_t packet_size = sizeof(header) + spawn_buffer.size() + sizeof(*block) + inventory_buffer.size();
+		auto outapp = new EQApplicationPacket(OP_PersonaSwap, packet_size);
+		outapp->WriteData(&header, sizeof(header));
+		outapp->WriteData(spawn_buffer.buffer(), spawn_buffer.size());
+		outapp->WriteData(block.get(), sizeof(*block));
+		outapp->WriteData(inventory_buffer.buffer(), inventory_buffer.size());
+		dest->FastQueuePacket(&outapp, ack_req);
+
+		delete in;
+	}
+
 	ENCODE(OP_PickPocket)
 	{
 		ENCODE_LENGTH_EXACT(sPickPocket_Struct);
@@ -3428,7 +3812,7 @@ namespace TOB
 		out.WriteUInt32(emu->lastlogin);
 		out.WriteUInt32(5000);
 		out.WriteUInt32(6000);
-		out.WriteUInt64(0x3FFFFFFF);
+		out.WriteUInt64(TOBExpansionFlags());
 
 		//u32 language_count;
 		out.WriteUInt32(32);
@@ -4135,7 +4519,7 @@ namespace TOB
 		s32 Category;
 		*/
 		buffer.WriteUInt32(emu->charges);
-		buffer.WriteInt32(emu->expansion);
+		buffer.WriteInt32(TOBAAExpansion(emu->expansion));
 		buffer.WriteInt32(emu->category);
 
 		/*
@@ -4281,7 +4665,7 @@ namespace TOB
 			eq_cse->Usable = emu_cse->Enabled; // this doesn't seem to do anything
 			eq_cse->Shrouded = 0;
 			eq_cse->Unknown = 0;
-			eq_cse->CharacterId = 0;
+			eq_cse->CharacterId = emu_cse->character_id;
 
 			emu_ptr += sizeof(CharacterSelectEntry_Struct);
 			eq_ptr += sizeof(structs::CharacterSelectEntry_Struct);
@@ -5182,16 +5566,20 @@ namespace TOB
 		FINISH_ENCODE();
 	}
 
+	// server merc states (zone/merc.h MERC_STATE_*); ToB inserted a state 5, so server 5 ("normal") is ToB 6
+	constexpr uint32 SERVER_MERC_STATE_SUSPENDED = 1;
+	constexpr uint32 SERVER_MERC_STATE_NORMAL    = 5;
+
 	ENCODE(OP_MercenaryTimer)
 	{
 		ENCODE_LENGTH_EXACT(MercenaryStatus_Struct);
 		SETUP_DIRECT_ENCODE(MercenaryStatus_Struct, structs::MercenaryStatus_Struct);
 
-		OUT(MercEntityID);
+		// the client treats byte 0 as "has a merc"; a suspended merc has no entity but still counts
+		eq->HasMerc = (emu->MercEntityID != 0 || emu->MercState == SERVER_MERC_STATE_SUSPENDED) ? 1 : 0;
 		OUT(UpdateInterval);
 		OUT(MercUnk01);
-		// ToB inserted a state 5; RoF2/server 5 ("normal"/no active merc) is 6 in ToB (layouts.md).
-		eq->MercState = (emu->MercState >= 5) ? emu->MercState + 1 : emu->MercState;
+		eq->MercState = (emu->MercState >= SERVER_MERC_STATE_NORMAL) ? emu->MercState + 1 : emu->MercState;
 		eq->SuspendedTime = emu->SuspendedTime;	// zero-extend unix time
 
 		FINISH_ENCODE();
@@ -5205,6 +5593,23 @@ namespace TOB
 		eq->SuspendTime = emu->SuspendTime;
 
 		FINISH_ENCODE();
+	}
+
+	// Role from the subtype's class digits (dbstr type 22/23 id: race, class, proficiency, tier; 6040105 = melee).
+	static uint32 TOBMercListRole(uint32 merc_sub_type)
+	{
+		constexpr uint32 SUBTYPE_CLASS_TANK         = 1;
+		constexpr uint32 SUBTYPE_CLASS_HEALER       = 2;
+		constexpr uint32 SUBTYPE_CLASS_MELEE_DAMAGE = 4;
+		constexpr uint32 SUBTYPE_CLASS_CASTER       = 12;
+
+		switch ((merc_sub_type / 10000) % 100) {
+			case SUBTYPE_CLASS_TANK:         return structs::MercListRoleTank;
+			case SUBTYPE_CLASS_HEALER:       return structs::MercListRoleHealer;
+			case SUBTYPE_CLASS_MELEE_DAMAGE: return structs::MercListRoleMeleeDamage;
+			case SUBTYPE_CLASS_CASTER:       return structs::MercListRoleCasterDamage;
+			default:                         return structs::MercListRoleNone;
+		}
 	}
 
 	// One merc list entry, ToB FUN_1402ca2e0. Used by OP_MercenaryDataUpdate and OP_MercenaryDataResponse.
@@ -5230,7 +5635,7 @@ namespace TOB
 		buffer.WriteUInt32(stance_count);
 		buffer.WriteInt32(unk03);
 		buffer.WriteUInt8(unk04);
-		buffer.WriteUInt32(0);	// new in ToB (entry+0x44), meaning unknown
+		buffer.WriteUInt32(TOBMercListRole(merc_sub_type));
 		if (name && name_max > 0) {
 			// client copies at most 63 chars (FUN_140086ea0); never read past the emu array
 			std::string n(name, strnlen(name, std::min<size_t>(name_max, 63)));
@@ -5271,7 +5676,7 @@ namespace TOB
 					m.Stances);
 			}
 			buffer.WriteUInt32(count ? emu->MercData[0].MercUnk05 : 1);	// RoF2 trailing field (unlocked slots)
-			buffer.WriteUInt32(0xb);	// new ToB trailing field; 0xb is the client's own default (FUN_1402c94d0)
+			buffer.WriteUInt32(structs::MERC_DATA_UPDATE_TRAILER);
 		}
 		else if (in->size >= sizeof(NoMercenaryHired_Struct)) {
 			// SendClearMercInfo: {-1, 0, 1} (or any MercStatus < 0)
@@ -5279,7 +5684,7 @@ namespace TOB
 			buffer.WriteInt32(emu->MercStatus);
 			buffer.WriteUInt32(0);
 			buffer.WriteUInt32(emu->MercID);
-			buffer.WriteUInt32(0xb);
+			buffer.WriteUInt32(structs::MERC_DATA_UPDATE_TRAILER);
 		}
 		else {
 			LogNetcode("TOB::ENCODE(OP_MercenaryDataUpdate) short packet [{}]", in->size);
@@ -6796,7 +7201,7 @@ namespace TOB
 		eq->add_unknown = 0;
 		eq->legacy_characters_ruleset = 0;
 		eq->num_max_characters = 0;
-		eq->num_personas_available = 10;
+		eq->num_personas_available = emu->persona_slots;
 		eq->has_de_ranger = 1; // this is probably an expansion flag only
 
 		if (Live::IsLiveStream(dest)) {
@@ -7988,6 +8393,451 @@ namespace TOB
 		FINISH_ENCODE();
 	}
 
+	static void SerializeSpawn(SerializeBuffer& buffer, Spawn_Struct* emu, bool live)
+	{
+		auto SpawnSize = emu->size;
+		if (!((emu->NPC == 0) || (emu->race <= Race::Gnome) || (emu->race == Race::Iksar) ||
+			(emu->race == Race::VahShir) || (emu->race == Race::Froglok2) || (emu->race == Race::Drakkin))
+			)
+		{
+			if (emu->size == 0)
+			{
+				emu->size = 6;
+				SpawnSize = 6;
+			}
+		}
+
+		if (SpawnSize == 0)
+		{
+			SpawnSize = 3;
+		}
+
+		/*
+		char Name[];
+		u32 SpawnId;
+		u8 Level;
+		float MeleeRadius;
+		*/
+		buffer.WriteString(emu->name);
+		buffer.WriteUInt32(emu->spawnId);
+		buffer.WriteUInt8(emu->level);
+		if (emu->DestructibleObject) //bounding radius: we should consider supporting this officially in the future
+		{
+			buffer.WriteFloat(10.0f);
+		}
+		else
+		{
+
+			buffer.WriteFloat(SpawnSize - 0.7f);
+		}
+
+		buffer.WriteFloat(1.0f); // This has something to do with collisions, generally between 1.0-1.1
+
+		/*
+		EqGuid HashKey; -- this is actually uint64 in the client
+		*/
+		buffer.WriteUInt32(emu->CharacterGuid.Id);
+		buffer.WriteUInt16(emu->CharacterGuid.WorldId);
+		buffer.WriteUInt16(0);
+
+		/*
+		u8 Type;
+		ActorFlags Flags;
+		*/
+		buffer.WriteUInt8(emu->NPC);
+
+		structs::Spawn_Struct_Bitfields flags;
+		memset(&flags, 0, sizeof(structs::Spawn_Struct_Bitfields));
+
+		flags.gender = emu->gender;
+		flags.ispet = emu->is_pet;
+		flags.afk = emu->afk;
+		flags.anon = emu->anon;
+		flags.gm = emu->gm;
+		flags.sneak = 0;
+		flags.lfg = emu->lfg;
+		flags.invis = emu->invis; //we need to implement this
+		flags.linkdead = 0; //on live I often see this as 1 for npcs, maybe consider adding this in the future
+		flags.showhelm = emu->showhelm;
+		flags.trader = emu->trader ? 1 : 0;
+		flags.targetable = 1;
+		flags.targetable_with_hotkey = emu->targetable_with_hotkey ? 1 : 0;
+		flags.showname = emu->show_name;
+		flags.buyer = emu->buyer ? 1 : 0;
+		flags.title = strlen(emu->title) > 0 ? 1 : 0;
+		flags.suffix = strlen(emu->suffix) > 0 ? 1 : 0;
+
+		if (emu->DestructibleObject || emu->class_ == Class::LDoNTreasure) {
+			flags.interactiveobject = 1;
+		}
+
+		//write flags
+		//buffer.WriteStructure(flags);
+		for (int j = 0; j < 5; ++j) {
+			buffer.WriteUInt8(flags.raw[j]);
+		}
+
+		/*
+		float EmitterScalingRadius;
+		s32 DefaultEmitterID;
+		*/
+
+		//we don't support this atm; wouldn't be hard to add I don't think
+		//RoF also supports this so might be worth implementing.
+		buffer.WriteFloat(1.0f);
+		buffer.WriteInt32(-1);
+
+		if (emu->DestructibleObject || emu->class_ == Class::LDoNTreasure) // flags & interactiveobject
+		{
+			/*
+			char InteractiveObjectModelName[];
+			char InteractiveObjectName[];
+			char InteractiveObjectOtherName[];
+			*/
+
+			buffer.WriteString(emu->DestructibleModel);
+			buffer.WriteString(emu->DestructibleName2);
+			buffer.WriteString(emu->DestructibleString);
+
+			/*
+			s32 CurrIOState;
+			s32 ObjectAnimationID;
+			*/
+			buffer.WriteUInt32(emu->DestructibleAppearance);
+			buffer.WriteUInt32(emu->DestructibleUnk1);
+
+			/*
+			s32 SoundId[10];
+			*/
+			buffer.WriteUInt32(emu->DestructibleID1);
+			buffer.WriteUInt32(emu->DestructibleID2);
+			buffer.WriteUInt32(emu->DestructibleID3);
+			buffer.WriteUInt32(emu->DestructibleID4);
+			buffer.WriteUInt32(emu->DestructibleUnk2);
+			buffer.WriteUInt32(emu->DestructibleUnk3);
+			buffer.WriteUInt32(emu->DestructibleUnk4);
+			buffer.WriteUInt32(emu->DestructibleUnk5);
+			buffer.WriteUInt32(emu->DestructibleUnk6);
+			buffer.WriteUInt32(emu->DestructibleUnk7);
+			/*
+			s8 Collidable;
+			s8 ObjectType;
+			*/
+			buffer.WriteUInt8(emu->DestructibleUnk8);
+			buffer.WriteUInt8(emu->DestructibleUnk9);
+		}
+
+		/*
+		u8 PropertyCount;
+		u32 Properties[PropertyCount];
+		*/
+		//We don't actually support multiple body types yet, but we should consider it in the future
+
+		if (!emu->DestructibleObject)
+		{
+			buffer.WriteUInt8(1);
+			buffer.WriteUInt32(emu->bodytype);
+		}
+		else
+		{
+			buffer.WriteUInt8(0);
+		}
+
+		/*
+		u8 HPCurrentPct;
+		*/
+		buffer.WriteUInt8(emu->curHp);
+
+		/*
+		s8 HairColor;
+		s8 FacialHairColor;
+		s8 EyeColor1;
+		s8 EyeColor2;
+		s8 HairStyle;
+		s8 FacialHair;
+		s32 Heritage;
+		s32 Tattoo;
+		s32 Details;
+		*/
+
+		buffer.WriteUInt8(emu->haircolor);
+		buffer.WriteUInt8(emu->beardcolor);
+		buffer.WriteUInt8(emu->eyecolor1);
+		buffer.WriteUInt8(emu->eyecolor2);
+		buffer.WriteUInt8(emu->hairstyle);
+		buffer.WriteUInt8(emu->beard);
+		buffer.WriteUInt32(emu->drakkin_heritage);
+		buffer.WriteUInt32(emu->drakkin_tattoo);
+		buffer.WriteUInt32(emu->drakkin_details);
+
+		/*
+		s8 TextureType;
+		s8 Material;
+		s8 Variation;
+		s8 HeadType;
+		*/
+		buffer.WriteUInt8(emu->equip_chest2);
+		buffer.WriteUInt8(0);
+		buffer.WriteUInt8(0);
+		buffer.WriteUInt8(emu->helm);
+
+		/*
+		float Height;
+		s8 FaceStyle;
+		float MyWalkSpeed;
+		float RunSpeed;
+		s32 Race;
+		*/
+
+		buffer.WriteFloat(emu->size);
+		buffer.WriteInt8(emu->face);
+		buffer.WriteFloat(emu->walkspeed);
+		buffer.WriteFloat(emu->runspeed);
+		buffer.WriteInt32(emu->race);
+
+		/*
+		u8 HoldingAnimation;
+		u32 Deity;
+		EqGuid GuildID;
+		u32 Class;
+		*/
+
+		buffer.WriteUInt8(0);
+		buffer.WriteUInt32(emu->deity);
+		// ToB guild ids are u64 and 0 means "no guild"; the server's 0xFFFFFFFF made the client
+		// think everyone (NPCs too) was in guild 4294967295
+		buffer.WriteUInt64(emu->NPC ? 0 : ServerToTOBGuildID(emu->guildID));
+		buffer.WriteUInt32(emu->class_);
+
+		/*
+		u8 PvP;
+		u8 StandState;
+		u8 Light;
+		u8 GravityBehavior;
+		*/
+
+		buffer.WriteUInt8(0);
+		buffer.WriteUInt8(emu->StandState);
+		buffer.WriteUInt8(emu->light);
+		buffer.WriteUInt8(emu->flymode);
+
+		/*
+		char LastName[];
+		*/
+		buffer.WriteString(emu->lastName);
+
+		/*
+		u8 bGuildShowAnim;
+		u8 bTempPet;
+		u32 MasterID;
+		u8 FindBits;
+		*/
+
+		buffer.WriteUInt8(emu->guild_show);
+		buffer.WriteUInt8(0);
+		buffer.WriteUInt32(emu->petOwnerId);
+		buffer.WriteUInt8(0);
+
+		/*
+		u32 PlayerState;
+		u32 NpcTintIndex;
+		u32 PrimaryTintIndex;
+		u32 SecondaryTintIndex;
+		*/
+
+		buffer.WriteUInt32(emu->PlayerState);
+		buffer.WriteUInt32(emu->npc_tint_id); // NpcTintIndex (npc_types.armortint_id), as RoF2
+		buffer.WriteUInt32(0);
+		buffer.WriteUInt32(0);
+
+		/*
+		u32 EncounterLockState;
+		u64 LockID;
+		*/
+
+		buffer.WriteUInt32(0);
+		buffer.WriteUInt64(0);
+
+		//u32 SeeInvis[3];
+		if (emu->NPC == 1) {
+			buffer.WriteUInt32(0);
+			buffer.WriteUInt32(0);
+			buffer.WriteUInt32(0);
+		}
+
+		/*
+		s32 Primary;
+		s32 Secondary;
+		*/
+		buffer.WriteUInt32(0xffffffff);
+		buffer.WriteUInt32(0xffffffff);
+
+		if ((emu->NPC == 0) || (emu->race <= Race::Gnome) || (emu->race == Race::Iksar) ||
+			(emu->race == Race::VahShir) || (emu->race == Race::Froglok2) || (emu->race == Race::Drakkin)
+			)
+		{
+			/*
+			u32 ArmorColor[9];
+			*/
+			for (int k = EQ::textures::textureBegin; k < EQ::textures::materialCount; ++k)
+			{
+				buffer.WriteUInt32(emu->equipment_tint.Slot[k].Color);
+			}
+
+			/*
+			Armor Armor[9];
+			*/
+			for (int k = EQ::textures::textureBegin; k < EQ::textures::materialCount; k++) {
+				buffer.WriteUInt32(emu->equipment.Slot[k].Material);
+				buffer.WriteUInt32(emu->equipment.Slot[k].Unknown1);
+				buffer.WriteUInt32(emu->equipment.Slot[k].EliteModel);
+				buffer.WriteUInt32(emu->equipment.Slot[k].HerosForgeModel);
+				buffer.WriteUInt32(emu->equipment.Slot[k].Unknown2);
+			}
+		}
+		else
+		{
+			//Armor Armor[3];
+			buffer.WriteUInt32(0);
+			buffer.WriteUInt32(0);
+			buffer.WriteUInt32(0);
+			buffer.WriteUInt32(0);
+			buffer.WriteUInt32(0);
+
+			buffer.WriteUInt32(emu->equipment.Primary.Material);
+			buffer.WriteUInt32(0);
+			buffer.WriteUInt32(0);
+			buffer.WriteUInt32(0);
+			buffer.WriteUInt32(0);
+
+			buffer.WriteUInt32(emu->equipment.Secondary.Material);
+			buffer.WriteUInt32(0);
+			buffer.WriteUInt32(0);
+			buffer.WriteUInt32(0);
+			buffer.WriteUInt32(0);
+		}
+
+		//u8 CPhysicsData[20];
+		if (live) {
+			// same fields, bits laid out differently
+			Live::structs::Spawn_Struct_Position live_position;
+			memset(&live_position, 0, sizeof(live_position));
+
+			live_position.y = emu->y;
+			live_position.deltaZ = emu->deltaZ;
+			live_position.deltaX = emu->deltaX;
+			live_position.x = emu->x;
+			live_position.heading = emu->heading;
+			live_position.deltaHeading = emu->deltaHeading;
+			live_position.z = emu->z;
+			live_position.animation = emu->animation;
+			live_position.deltaY = emu->deltaY;
+
+			for (int j = 0; j < 5; ++j) {
+				buffer.WriteUInt32(live_position.raw[j]);
+			}
+		}
+		else {
+			structs::Spawn_Struct_Position position;
+			memset(&position, 0, sizeof(structs::Spawn_Struct_Position));
+
+			position.y = emu->y;
+			position.deltaZ = emu->deltaZ;
+			position.deltaX = emu->deltaX;
+			position.x = emu->x;
+			position.heading = emu->heading;
+			position.deltaHeading = emu->deltaHeading;
+			position.z = emu->z;
+			position.animation = emu->animation;
+			position.deltaY = emu->deltaY;
+
+			//buffer.WriteStructure(position);
+			for (int j = 0; j < 5; ++j) {
+				buffer.WriteUInt32(position.raw[j]);
+			}
+		}
+
+		/*
+		if(Flags.title) {
+			char Title[];
+		}
+		*/
+		if (flags.title) {
+			buffer.WriteString(emu->title);
+		}
+
+		/*
+		if(Flags.suffix) {
+			char Suffix[];
+		}
+		*/
+		if (flags.suffix) {
+			buffer.WriteString(emu->suffix);
+		}
+
+		/*
+		u32 Unknown0x0164;
+		s32 SplineID;
+		*/
+
+		buffer.WriteUInt32(0);
+		buffer.WriteUInt32(0);
+
+		/*
+		u8 Mercenary;
+		*/
+		buffer.WriteUInt8(emu->IsMercenary);
+
+		/*
+			char realEstateItemGuid[];
+			s32 RealEstateID;
+			s32 RealEstateItemId;
+		*/
+
+		buffer.WriteString("0000000000000000");
+		buffer.WriteInt32(-1);
+		buffer.WriteInt32(-1);
+
+		/*
+		s32 MercId;
+		s32 ContractorID;
+		u32 Birthdate;
+		u8 bAlwaysShowAura;
+		*/
+
+		buffer.WriteInt32(0);
+		buffer.WriteInt32(0);
+		buffer.WriteUInt32(0);
+		buffer.WriteUInt8(0);
+
+		/*
+		u32 physicsEffectCount;
+		PhysicsEffect physicsEffects[physicsEffectCount];
+		*/
+		buffer.WriteUInt32(0);
+
+		//s32 SpawnStatus[6];
+		buffer.WriteUInt32(0);
+		buffer.WriteUInt32(0);
+		buffer.WriteUInt32(0);
+		buffer.WriteUInt32(0);
+		buffer.WriteUInt32(0);
+		buffer.WriteUInt32(0);
+
+		if (flags.interactiveobject && emu->DestructibleUnk9 == 4) {
+			/*
+			s32 BannerIndex0;
+			s32 BannerIndex1;
+			s32 BannerTint0;
+			s32 BannerTint1;
+			*/
+			buffer.WriteUInt32(0);
+			buffer.WriteUInt32(0);
+			buffer.WriteUInt32(0);
+			buffer.WriteUInt32(0);
+		}
+	}
+
 	ENCODE(OP_ZoneSpawns)
 	{
 		EQApplicationPacket* in = *p;
@@ -8007,448 +8857,7 @@ namespace TOB
 		
 		for (int i = 0; i < entrycount; i++, emu++) {
 			SerializeBuffer buffer;
-
-			auto SpawnSize = emu->size;
-			if (!((emu->NPC == 0) || (emu->race <= Race::Gnome) || (emu->race == Race::Iksar) ||
-				(emu->race == Race::VahShir) || (emu->race == Race::Froglok2) || (emu->race == Race::Drakkin))
-				)
-			{
-				if (emu->size == 0)
-				{
-					emu->size = 6;
-					SpawnSize = 6;
-				}
-			}
-
-			if (SpawnSize == 0)
-			{
-				SpawnSize = 3;
-			}
-
-			/*
-			char Name[];
-			u32 SpawnId;
-			u8 Level;
-			float MeleeRadius;
-			*/
-			buffer.WriteString(emu->name);
-			buffer.WriteUInt32(emu->spawnId);
-			buffer.WriteUInt8(emu->level);
-			if (emu->DestructibleObject) //bounding radius: we should consider supporting this officially in the future
-			{
-				buffer.WriteFloat(10.0f);
-			}
-			else
-			{
-
-				buffer.WriteFloat(SpawnSize - 0.7f);
-			}
-
-			buffer.WriteFloat(1.0f); // This has something to do with collisions, generally between 1.0-1.1
-
-			/*
-			EqGuid HashKey; -- this is actually uint64 in the client
-			*/
-			buffer.WriteUInt32(emu->CharacterGuid.Id);
-			buffer.WriteUInt16(emu->CharacterGuid.WorldId);
-			buffer.WriteUInt16(0);
-
-			/*
-			u8 Type;
-			ActorFlags Flags;
-			*/
-			buffer.WriteUInt8(emu->NPC);
-
-			structs::Spawn_Struct_Bitfields flags;
-			memset(&flags, 0, sizeof(structs::Spawn_Struct_Bitfields));
-
-			flags.gender = emu->gender;
-			flags.ispet = emu->is_pet;
-			flags.afk = emu->afk;
-			flags.anon = emu->anon;
-			flags.gm = emu->gm;
-			flags.sneak = 0;
-			flags.lfg = emu->lfg;
-			flags.invis = emu->invis; //we need to implement this
-			flags.linkdead = 0; //on live I often see this as 1 for npcs, maybe consider adding this in the future
-			flags.showhelm = emu->showhelm;
-			flags.trader = emu->trader ? 1 : 0;
-			flags.targetable = 1;
-			flags.targetable_with_hotkey = emu->targetable_with_hotkey ? 1 : 0;
-			flags.showname = emu->show_name;
-			flags.buyer = emu->buyer ? 1 : 0;
-			flags.title = strlen(emu->title) > 0 ? 1 : 0;
-			flags.suffix = strlen(emu->suffix) > 0 ? 1 : 0;
-
-			if (emu->DestructibleObject || emu->class_ == Class::LDoNTreasure) {
-				flags.interactiveobject = 1;
-			}
-
-			//write flags
-			//buffer.WriteStructure(flags);
-			for (int j = 0; j < 5; ++j) {
-				buffer.WriteUInt8(flags.raw[j]);
-			}
-
-			/*
-			float EmitterScalingRadius;
-			s32 DefaultEmitterID;
-			*/
-
-			//we don't support this atm; wouldn't be hard to add I don't think
-			//RoF also supports this so might be worth implementing.
-			buffer.WriteFloat(1.0f);
-			buffer.WriteInt32(-1);
-
-			if (emu->DestructibleObject || emu->class_ == Class::LDoNTreasure) // flags & interactiveobject
-			{
-				/*
-				char InteractiveObjectModelName[];
-				char InteractiveObjectName[];
-				char InteractiveObjectOtherName[];
-				*/
-
-				buffer.WriteString(emu->DestructibleModel);
-				buffer.WriteString(emu->DestructibleName2);
-				buffer.WriteString(emu->DestructibleString);
-
-				/*
-				s32 CurrIOState;
-				s32 ObjectAnimationID;
-				*/
-				buffer.WriteUInt32(emu->DestructibleAppearance);
-				buffer.WriteUInt32(emu->DestructibleUnk1);
-
-				/*
-				s32 SoundId[10];
-				*/
-				buffer.WriteUInt32(emu->DestructibleID1);
-				buffer.WriteUInt32(emu->DestructibleID2);
-				buffer.WriteUInt32(emu->DestructibleID3);
-				buffer.WriteUInt32(emu->DestructibleID4);
-				buffer.WriteUInt32(emu->DestructibleUnk2);
-				buffer.WriteUInt32(emu->DestructibleUnk3);
-				buffer.WriteUInt32(emu->DestructibleUnk4);
-				buffer.WriteUInt32(emu->DestructibleUnk5);
-				buffer.WriteUInt32(emu->DestructibleUnk6);
-				buffer.WriteUInt32(emu->DestructibleUnk7);
-				/*
-				s8 Collidable;
-				s8 ObjectType;
-				*/
-				buffer.WriteUInt8(emu->DestructibleUnk8);
-				buffer.WriteUInt8(emu->DestructibleUnk9);
-			}
-
-			/*
-			u8 PropertyCount;
-			u32 Properties[PropertyCount];
-			*/
-			//We don't actually support multiple body types yet, but we should consider it in the future
-
-			if (!emu->DestructibleObject)
-			{
-				buffer.WriteUInt8(1);
-				buffer.WriteUInt32(emu->bodytype);
-			}
-			else
-			{
-				buffer.WriteUInt8(0);
-			}
-
-			/*
-			u8 HPCurrentPct;
-			*/
-			buffer.WriteUInt8(emu->curHp);
-
-			/*
-			s8 HairColor;
-			s8 FacialHairColor;
-			s8 EyeColor1;
-			s8 EyeColor2;
-			s8 HairStyle;
-			s8 FacialHair;
-			s32 Heritage;
-			s32 Tattoo;
-			s32 Details;
-			*/
-
-			buffer.WriteUInt8(emu->haircolor);
-			buffer.WriteUInt8(emu->beardcolor);
-			buffer.WriteUInt8(emu->eyecolor1);
-			buffer.WriteUInt8(emu->eyecolor2);
-			buffer.WriteUInt8(emu->hairstyle);
-			buffer.WriteUInt8(emu->beard);
-			buffer.WriteUInt32(emu->drakkin_heritage);
-			buffer.WriteUInt32(emu->drakkin_tattoo);
-			buffer.WriteUInt32(emu->drakkin_details);
-
-			/*
-			s8 TextureType;
-			s8 Material;
-			s8 Variation;
-			s8 HeadType;
-			*/
-			buffer.WriteUInt8(emu->equip_chest2);
-			buffer.WriteUInt8(0);
-			buffer.WriteUInt8(0);
-			buffer.WriteUInt8(emu->helm);
-
-			/*
-			float Height;
-			s8 FaceStyle;
-			float MyWalkSpeed;
-			float RunSpeed;
-			s32 Race;
-			*/
-
-			buffer.WriteFloat(emu->size);
-			buffer.WriteInt8(emu->face);
-			buffer.WriteFloat(emu->walkspeed);
-			buffer.WriteFloat(emu->runspeed);
-			buffer.WriteInt32(emu->race);
-
-			/*
-			u8 HoldingAnimation;
-			u32 Deity;
-			EqGuid GuildID;
-			u32 Class;
-			*/
-
-			buffer.WriteUInt8(0);
-			buffer.WriteUInt32(emu->deity);
-			// ToB guild ids are u64 and 0 means "no guild"; the server's 0xFFFFFFFF made the client
-			// think everyone (NPCs too) was in guild 4294967295
-			buffer.WriteUInt64(emu->NPC ? 0 : ServerToTOBGuildID(emu->guildID));
-			buffer.WriteUInt32(emu->class_);
-
-			/*
-			u8 PvP;
-			u8 StandState;
-			u8 Light;
-			u8 GravityBehavior;
-			*/
-
-			buffer.WriteUInt8(0);
-			buffer.WriteUInt8(emu->StandState);
-			buffer.WriteUInt8(emu->light);
-			buffer.WriteUInt8(emu->flymode);
-
-			/*
-			char LastName[];
-			*/
-			buffer.WriteString(emu->lastName);
-
-			/*
-			u8 bGuildShowAnim;
-			u8 bTempPet;
-			u32 MasterID;
-			u8 FindBits;
-			*/
-
-			buffer.WriteUInt8(emu->guild_show);
-			buffer.WriteUInt8(0);
-			buffer.WriteUInt32(emu->petOwnerId);
-			buffer.WriteUInt8(0);
-
-			/*
-			u32 PlayerState;
-			u32 NpcTintIndex;
-			u32 PrimaryTintIndex;
-			u32 SecondaryTintIndex;
-			*/
-
-			buffer.WriteUInt32(emu->PlayerState);
-			buffer.WriteUInt32(emu->npc_tint_id); // NpcTintIndex (npc_types.armortint_id), as RoF2
-			buffer.WriteUInt32(0);
-			buffer.WriteUInt32(0);
-
-			/*
-			u32 EncounterLockState;
-			u64 LockID;
-			*/
-
-			buffer.WriteUInt32(0);
-			buffer.WriteUInt64(0);
-
-			//u32 SeeInvis[3];
-			if (emu->NPC == 1) {
-				buffer.WriteUInt32(0);
-				buffer.WriteUInt32(0);
-				buffer.WriteUInt32(0);
-			}
-
-			/*
-			s32 Primary;
-			s32 Secondary;
-			*/
-			buffer.WriteUInt32(0xffffffff);
-			buffer.WriteUInt32(0xffffffff);
-
-			if ((emu->NPC == 0) || (emu->race <= Race::Gnome) || (emu->race == Race::Iksar) ||
-				(emu->race == Race::VahShir) || (emu->race == Race::Froglok2) || (emu->race == Race::Drakkin)
-				)
-			{
-				/*
-				u32 ArmorColor[9];
-				*/
-				for (int k = EQ::textures::textureBegin; k < EQ::textures::materialCount; ++k)
-				{
-					buffer.WriteUInt32(emu->equipment_tint.Slot[k].Color);
-				}
-
-				/*
-				Armor Armor[9];
-				*/
-				for (int k = EQ::textures::textureBegin; k < EQ::textures::materialCount; k++) {
-					buffer.WriteUInt32(emu->equipment.Slot[k].Material);
-					buffer.WriteUInt32(emu->equipment.Slot[k].Unknown1);
-					buffer.WriteUInt32(emu->equipment.Slot[k].EliteModel);
-					buffer.WriteUInt32(emu->equipment.Slot[k].HerosForgeModel);
-					buffer.WriteUInt32(emu->equipment.Slot[k].Unknown2);
-				}
-			}
-			else
-			{
-				//Armor Armor[3];
-				buffer.WriteUInt32(0);
-				buffer.WriteUInt32(0);
-				buffer.WriteUInt32(0);
-				buffer.WriteUInt32(0);
-				buffer.WriteUInt32(0);
-
-				buffer.WriteUInt32(emu->equipment.Primary.Material);
-				buffer.WriteUInt32(0);
-				buffer.WriteUInt32(0);
-				buffer.WriteUInt32(0);
-				buffer.WriteUInt32(0);
-
-				buffer.WriteUInt32(emu->equipment.Secondary.Material);
-				buffer.WriteUInt32(0);
-				buffer.WriteUInt32(0);
-				buffer.WriteUInt32(0);
-				buffer.WriteUInt32(0);
-			}
-
-			//u8 CPhysicsData[20];
-			if (live) {
-				// same fields, bits laid out differently
-				Live::structs::Spawn_Struct_Position live_position;
-				memset(&live_position, 0, sizeof(live_position));
-
-				live_position.y = emu->y;
-				live_position.deltaZ = emu->deltaZ;
-				live_position.deltaX = emu->deltaX;
-				live_position.x = emu->x;
-				live_position.heading = emu->heading;
-				live_position.deltaHeading = emu->deltaHeading;
-				live_position.z = emu->z;
-				live_position.animation = emu->animation;
-				live_position.deltaY = emu->deltaY;
-
-				for (int j = 0; j < 5; ++j) {
-					buffer.WriteUInt32(live_position.raw[j]);
-				}
-			}
-			else {
-				structs::Spawn_Struct_Position position;
-				memset(&position, 0, sizeof(structs::Spawn_Struct_Position));
-
-				position.y = emu->y;
-				position.deltaZ = emu->deltaZ;
-				position.deltaX = emu->deltaX;
-				position.x = emu->x;
-				position.heading = emu->heading;
-				position.deltaHeading = emu->deltaHeading;
-				position.z = emu->z;
-				position.animation = emu->animation;
-				position.deltaY = emu->deltaY;
-
-				//buffer.WriteStructure(position);
-				for (int j = 0; j < 5; ++j) {
-					buffer.WriteUInt32(position.raw[j]);
-				}
-			}
-
-			/*
-			if(Flags.title) {
-				char Title[];
-			}
-			*/
-			if (flags.title) {
-				buffer.WriteString(emu->title);
-			}
-
-			/*
-			if(Flags.suffix) {
-				char Suffix[];
-			}
-			*/
-			if (flags.suffix) {
-				buffer.WriteString(emu->suffix);
-			}
-
-			/*
-			u32 Unknown0x0164;
-			s32 SplineID;
-			*/
-
-			buffer.WriteUInt32(0);
-			buffer.WriteUInt32(0);
-
-			/*
-			u8 Mercenary;
-			*/
-			buffer.WriteUInt8(emu->IsMercenary);
-
-			/*
-				char realEstateItemGuid[];
-				s32 RealEstateID;
-				s32 RealEstateItemId;
-			*/
-
-			buffer.WriteString("0000000000000000");
-			buffer.WriteInt32(-1);
-			buffer.WriteInt32(-1);
-
-			/*
-			s32 MercId;
-			s32 ContractorID;
-			u32 Birthdate;
-			u8 bAlwaysShowAura;
-			*/
-
-			buffer.WriteInt32(0);
-			buffer.WriteInt32(0);
-			buffer.WriteUInt32(0);
-			buffer.WriteUInt8(0);
-
-			/*
-			u32 physicsEffectCount;
-			PhysicsEffect physicsEffects[physicsEffectCount];
-			*/
-			buffer.WriteUInt32(0);
-
-			//s32 SpawnStatus[6];
-			buffer.WriteUInt32(0);
-			buffer.WriteUInt32(0);
-			buffer.WriteUInt32(0);
-			buffer.WriteUInt32(0);
-			buffer.WriteUInt32(0);
-			buffer.WriteUInt32(0);
-
-			if (flags.interactiveobject && emu->DestructibleUnk9 == 4) {
-				/*
-				s32 BannerIndex0;
-				s32 BannerIndex1;
-				s32 BannerTint0;
-				s32 BannerTint1;
-				*/
-				buffer.WriteUInt32(0);
-				buffer.WriteUInt32(0);
-				buffer.WriteUInt32(0);
-				buffer.WriteUInt32(0);
-			}
+			SerializeSpawn(buffer, emu, live);
 
 			auto outapp = new EQApplicationPacket(OP_ZoneEntry, buffer.size());
 			outapp->WriteData(buffer.buffer(), buffer.size());
@@ -9117,6 +9526,39 @@ namespace TOB
 		FINISH_DIRECT_DECODE();
 	}
 
+	DECODE(OP_FellowshipAction)
+	{
+		DECODE_LENGTH_EXACT(structs::FellowshipAction_Struct);
+
+		const auto in = reinterpret_cast<const structs::FellowshipAction_Struct *>(__packet->pBuffer);
+		if (strnlen(in->text, sizeof(in->text)) >= sizeof(in->text)) {
+			LogNetcode("TOB::DECODE(OP_FellowshipAction) unterminated text, action [{}]", in->action);
+			__packet->SetOpcode(OP_Unknown);
+			return;
+		}
+
+		SETUP_DIRECT_DECODE(FellowshipAction_Struct, structs::FellowshipAction_Struct);
+
+		IN(action);
+		emu->target_character_id = eq->target_guid.Id;
+		emu->fellowship_id       = eq->fellowship_guid.Id;
+		IN(campfire_type);
+		strn0cpy(emu->motd, eq->text, sizeof(emu->motd));
+
+		FINISH_DIRECT_DECODE();
+	}
+
+	DECODE(OP_FellowshipCampfireListRequest)
+	{
+		DECODE_LENGTH_EXACT(structs::FellowshipCampfireListRequest_Struct);
+		SETUP_DIRECT_DECODE(FellowshipCampfireListRequest_Struct, structs::FellowshipCampfireListRequest_Struct);
+
+		IN(only_usable);
+		IN(category);
+
+		FINISH_DIRECT_DECODE();
+	}
+
 // -----------------------------------------------------------------------------------------------------
 	DECODE(OP_GuildInvite)
 	{
@@ -9719,6 +10161,28 @@ namespace TOB
 		delete[] __eq_buffer;
 	}
 
+	DECODE(OP_EquipmentKeyRingOption)
+	{
+		DECODE_LENGTH_EXACT(structs::EquipmentKeyRingOption_Struct);
+		SETUP_DIRECT_DECODE(EquipmentKeyRingOption_Struct, structs::EquipmentKeyRingOption_Struct);
+
+		IN(store_equipment_sets);
+
+		FINISH_DIRECT_DECODE();
+	}
+
+	DECODE(OP_EquipmentSetAction)
+	{
+		DECODE_LENGTH_EXACT(structs::EquipmentSetAction_Struct);
+		SETUP_DIRECT_DECODE(EquipmentSetAction_Struct, structs::EquipmentSetAction_Struct);
+
+		IN(action);
+		IN(class_id);
+		IN(unknown008);
+
+		FINISH_DIRECT_DECODE();
+	}
+
 	DECODE(OP_FindPersonRequest)
 	{
 		DECODE_LENGTH_EXACT(structs::FindPersonRequest_Struct);
@@ -9933,29 +10397,41 @@ namespace TOB
 
 		Log(Logs::Detail, Logs::Netcode, "TOB::DECODE(OP_MoveItem)");
 
-		// ToB has slots the server doesn't: general 11/12, shared bank past the second slot, and the bags in them.
-		// TOBToServerSlot maps them to SLOT_INVALID, which Client::SwapItem treats as "destroy the cursor item".
-		// Use a different invalid value so the move is rejected instead (item stays on the cursor server-side).
-		auto tob_extra_slot = [](const structs::InventorySlot_Struct &s) {
-			const bool extra_general = s.Type == invtype::typePossessions &&
-				(s.Slot == invslot::slotGeneral11 || s.Slot == invslot::slotGeneral12);
-			const bool unmapped_storage = (s.Type == invtype::typeBank || s.Type == invtype::typeSharedBank) &&
-				s.Slot != invslot::SLOT_INVALID && TOBToServerSlot(s) == static_cast<uint32>(EQ::invslot::SLOT_INVALID);
-			return extra_general || unmapped_storage;
-		};
-		constexpr uint32 TOB_REJECT_SLOT = 0xFFFFFFFE;
-
-		// key ring and stat slots that do not map (stat selection, bad index) must not read as "destroy" either
-		auto tob_unmapped_ring = [](const structs::InventorySlot_Struct &s) {
-			return s.Type >= invtype::typeMountKeyRingItems && s.Type <= invtype::typeViewModActivatedKeyRingItems &&
-				TOBToServerSlot(s) == static_cast<uint32>(EQ::invslot::SLOT_INVALID);
-		};
-
-		emu->from_slot = (tob_extra_slot(eq->from_slot) || tob_unmapped_ring(eq->from_slot)) ? TOB_REJECT_SLOT : TOBToServerSlot(eq->from_slot);
-		emu->to_slot   = (tob_extra_slot(eq->to_slot) || tob_unmapped_ring(eq->to_slot)) ? TOB_REJECT_SLOT : TOBToServerSlot(eq->to_slot);
+		emu->from_slot = TOBToServerMoveSlot(eq->from_slot);
+		emu->to_slot   = TOBToServerMoveSlot(eq->to_slot);
 		IN(number_in_stack);
 
 		FINISH_DIRECT_DECODE();
+	}
+
+	DECODE(OP_MoveMultipleItems)
+	{
+		// ctrl-click moves of a bag's contents. Every slot is translated to the server's typed slots; a slot the
+		// server doesn't have becomes an invalid typed slot, so the handler rejects the whole move.
+		static_assert(sizeof(structs::MultiMoveItemSub_Struct) == sizeof(::MultiMoveItemSub_Struct));
+
+		if (__packet->size < sizeof(structs::MultiMoveItem_Struct)) {
+			return; // the handler rejects short packets
+		}
+
+		auto eq = reinterpret_cast<structs::MultiMoveItem_Struct *>(__packet->pBuffer);
+		if (__packet->size != sizeof(structs::MultiMoveItem_Struct) + sizeof(structs::MultiMoveItemSub_Struct) * static_cast<size_t>(eq->count)) {
+			return; // the handler rejects a size mismatch
+		}
+
+		Log(Logs::Detail, Logs::Netcode, "TOB::DECODE(OP_MoveMultipleItems) count [{}]", eq->count);
+
+		auto emu = reinterpret_cast<::MultiMoveItem_Struct *>(__packet->pBuffer);
+		for (uint32 i = 0; i < eq->count; ++i) {
+			const structs::MultiMoveItemSub_Struct in = eq->moves[i];
+
+			::MultiMoveItemSub_Struct out{};
+			out.from_slot       = ServerToEmuTypedSlot(TOBToServerMoveSlot(in.from_slot));
+			out.to_slot         = ServerToEmuTypedSlot(TOBToServerMoveSlot(in.to_slot));
+			out.number_in_stack = in.number_in_stack;
+
+			memcpy(&emu->moves[i], &out, sizeof(out));
+		}
 	}
 
 	// GM petition queue: check-in sends the record header + gmtext as a C string (variable length)
@@ -10034,6 +10510,56 @@ namespace TOB
 		FINISH_DIRECT_DECODE();
 	}
 
+	DECODE(OP_PersonaCharCreate)
+	{
+		DECODE_LENGTH_EXACT(structs::PersonaCharCreate_Struct);
+		SETUP_DIRECT_DECODE(PersonaCharCreate_Struct, structs::PersonaCharCreate_Struct);
+
+		strn0cpy(emu->name, eq->name, sizeof(emu->name));
+		IN(character_id);
+
+		emu->create.gender = eq->gender;
+		emu->create.race = eq->race;
+		emu->create.class_ = eq->class_;
+		emu->create.deity = eq->deity;
+		emu->create.start_zone = eq->start_zone;
+		emu->create.haircolor = eq->haircolor;
+		emu->create.beard = eq->beard;
+		emu->create.beardcolor = eq->beardcolor;
+		emu->create.hairstyle = eq->hairstyle;
+		emu->create.face = eq->face;
+		emu->create.eyecolor1 = eq->eyecolor1;
+		emu->create.eyecolor2 = eq->eyecolor2;
+		emu->create.drakkin_heritage = eq->drakkin_heritage;
+		emu->create.drakkin_tattoo = eq->drakkin_tattoo;
+		emu->create.drakkin_details = eq->drakkin_details;
+		emu->create.STR = eq->STR;
+		emu->create.STA = eq->STA;
+		emu->create.AGI = eq->AGI;
+		emu->create.DEX = eq->DEX;
+		emu->create.WIS = eq->WIS;
+		emu->create.INT = eq->INT;
+		emu->create.CHA = eq->CHA;
+		emu->create.tutorial = eq->tutorial;
+
+		FINISH_DIRECT_DECODE();
+	}
+
+	DECODE(OP_PersonaCreate)
+	{
+		DECODE_LENGTH_EXACT(structs::PersonaRequest_Struct);
+		SETUP_DIRECT_DECODE(PersonaRequest_Struct, structs::PersonaRequest_Struct);
+
+		IN(target_class);
+		IN(aa_purchasable);
+		IN(auto_save_equipment_set);
+		IN(current_class);
+
+		FINISH_DIRECT_DECODE();
+	}
+
+	DECODE(OP_PersonaSwitch) { DECODE_FORWARD(OP_PersonaCreate); }
+
 	DECODE(OP_PickPocket)
 	{
 		DECODE_LENGTH_ATLEAST(structs::PickPocket_Struct);
@@ -10074,7 +10600,7 @@ namespace TOB
 		LogNetcode("TOB RecipeAutoCombine raw: con_type [{}] recipe_id [{}] unknown1 [{}] slot_type [{}] object_type [{}] some_id [{}]",
 			eq->con_type, eq->recipe_id, eq->unknown1, eq->container_slot.Type, eq->object_type, eq->some_id);
 		emu->combine.object_type = eq->con_type;
-		emu->combine.some_id     = eq->some_id;
+		emu->combine.some_id     = eq->recipe_id ? eq->recipe_id : eq->some_id; // bag combines need the container item id
 		emu->combine.unknown1    = TOBToServerSlot(eq->container_slot);
 		emu->combine.recipe_id   = eq->object_type;
 		emu->combine.reply_code  = 0;  // junk in client request; server overwrites in reply
@@ -10094,6 +10620,21 @@ namespace TOB
 		for (r = 0; r < 29; r++) {
 			// Size 69 in TOB
 			IN(filters[r]);
+		}
+
+		// The combat text filters sit one slot lower in TOB (no 'None' entry: TOB 13 = My Misses, 19 = Pet Hits),
+		// and TOB's four miss/hit filters use 0 = show, 1 = hide where the server expects 1 = show. Pet hits read the
+		// Pet Misses setting before, so mercenary and pet hits vanished for players who hide pet misses.
+		// The chat and spell filters (TOB 0..12) are left as they were until their order is confirmed.
+		for (r = FilterMyMisses; r <= FilterBardSongsOnPets; r++) {
+			emu->filters[r] = eq->filters[r - 1];
+		}
+
+		// TOB 13 is My Misses, not Spell Damage; show spell damage until the TOB slot for it is known
+		emu->filters[FilterSpellDamage] = 0;
+
+		for (int f : { FilterMyMisses, FilterOthersMiss, FilterOthersHit, FilterMissedMe }) {
+			emu->filters[f] = emu->filters[f] == 0 ? 1 : 0;
 		}
 
 		FINISH_DIRECT_DECODE();
@@ -10904,11 +11445,21 @@ namespace TOB
 		}
 		buffer.WriteInt32(0); //unsupported atm
 
-		//SpellData SpellDataFocus2; //unsupported atm
-		buffer.WriteInt32(-1);
-		buffer.WriteUInt8(0);
-		buffer.WriteUInt8(0);
-		buffer.WriteInt32(0);
+		//SpellData SpellDataFocus2;
+		// ToB has no separate bard effect block (RoF2 sends one after Focus), so an instrument's effect
+		// (Wind Resonance and the like) goes here or the item shows no instrument focus at all
+		if (item->Bard.Effect > 0) {
+			buffer.WriteInt32(item->Bard.Effect);
+			buffer.WriteUInt8(item->Bard.Level2);
+			buffer.WriteUInt8(item->Bard.Type);
+			buffer.WriteInt32(item->Bard.Level);
+		}
+		else {
+			buffer.WriteInt32(-1);
+			buffer.WriteUInt8(0);
+			buffer.WriteUInt8(0);
+			buffer.WriteInt32(0);
+		}
 		buffer.WriteInt32(0);
 		buffer.WriteInt32(0);
 		buffer.WriteInt32(0);
@@ -11275,11 +11826,31 @@ namespace TOB
 			SubSlotNumber = slot_id_in; // not sure if this is the best way to handle this..leaving for now
 
 		if (SubSlotNumber != EQ::invbag::SLOT_INVALID) {
+			// the client crashes on an item past a bag's own slots, so those stay on the server; items that
+			// aren't bags carry their augments here and send them all
+			const bool   is_bag    = inst->IsClassBag();
+			const uint32 bag_slots = is_bag ? inst->GetItem()->BagSlots : 0;
+
 			std::vector<std::pair<int, EQ::ItemInstance*>> subitems;
 			for (uint32 index = EQ::invbag::SLOT_BEGIN; index <= EQ::invbag::SLOT_END; ++index) {
 				EQ::ItemInstance* sub = inst->GetItem(index);
-				if (sub != nullptr)
-					subitems.emplace_back(index, sub);
+				if (sub == nullptr) {
+					continue;
+				}
+
+				if (is_bag && index >= bag_slots) {
+					LogError(
+						"Item [{}] in bag [{}] (slot [{}]) is at index [{}] but the bag has [{}] slots, not sent",
+						sub->GetID(),
+						inst->GetID(),
+						slot_id_in,
+						index,
+						bag_slots
+					);
+					continue;
+				}
+
+				subitems.emplace_back(index, sub);
 			}
 
 			buffer.WriteUInt32(subitems.size());
@@ -11611,7 +12182,14 @@ namespace TOB
 			}
 		}
 
-		else if (server_slot <= EQ::invbag::CURSOR_BAG_END && server_slot >= EQ::invbag::GENERAL_BAGS_BEGIN) {
+		else if (server_slot <= EQ::invbag::CURSOR_BAG_END && server_slot >= EQ::invbag::CURSOR_BAG_BEGIN) {
+			// the server's cursor bag follows general bag 10, but ToB's cursor comes after general 11/12
+			TOBSlot.Type = invtype::typePossessions;
+			TOBSlot.Slot = invslot::slotCursor;
+			TOBSlot.SubIndex = server_slot - EQ::invbag::CURSOR_BAG_BEGIN;
+		}
+
+		else if (server_slot <= EQ::invbag::GENERAL_BAGS_END && server_slot >= EQ::invbag::GENERAL_BAGS_BEGIN) {
 			TempSlot = server_slot - EQ::invbag::GENERAL_BAGS_BEGIN;
 
 			TOBSlot.Type = invtype::typePossessions;
@@ -11682,6 +12260,16 @@ namespace TOB
 			TOBSlot.Slot = EQ::invslot::KeyRingIndexFromSlot(server_slot);
 		}
 
+		else if (EQ::invslot::IsEquipmentKeyRingRange(server_slot)) {
+			TOBSlot.Type = invtype::typeEquipmentKeyRingItems;
+			TOBSlot.Slot = server_slot == EQ::invslot::EQUIPMENT_KEYRING_APPEND ?
+				invslot::SLOT_INVALID : static_cast<int16>(server_slot - EQ::invslot::EQUIPMENT_KEYRING_BEGIN);
+		}
+		else if (EQ::invslot::IsMercEquipmentSlot(server_slot)) {
+			TOBSlot.Type = invtype::typeMercenaryItems;
+			TOBSlot.Slot = EQ::invslot::MercEquipmentIndex(server_slot);
+		}
+
 		Log(Logs::Detail, Logs::Netcode, fmt::format("Convert Server Slot {} to TOB Slot [{}, {}, {}, {}]",
 			server_slot, TOBSlot.Type, TOBSlot.Slot, TOBSlot.SubIndex, TOBSlot.AugIndex).c_str());
 
@@ -11728,11 +12316,22 @@ namespace TOB
 		uint32 TempSlot = EQ::invslot::SLOT_INVALID;
 
 		if (server_type == EQ::invtype::typePossessions) {
-			if (server_slot < EQ::invtype::POSSESSIONS_SIZE) {
+			if (server_slot == EQ::invslot::slotCursor) {
+				// ToB's cursor comes after general 11/12; server slot 33 is ToB's general 11
+				TOBSlot.Slot = invslot::slotCursor;
+			}
+
+			else if (server_slot < EQ::invtype::POSSESSIONS_SIZE) {
 				TOBSlot.Slot = server_slot;
 			}
 
-			else if (server_slot <= EQ::invbag::CURSOR_BAG_END && server_slot >= EQ::invbag::GENERAL_BAGS_BEGIN) {
+			else if (server_slot <= EQ::invbag::CURSOR_BAG_END && server_slot >= EQ::invbag::CURSOR_BAG_BEGIN) {
+				// ToB's cursor comes after general 11/12
+				TOBSlot.Slot = invslot::slotCursor;
+				TOBSlot.SubIndex = server_slot - EQ::invbag::CURSOR_BAG_BEGIN;
+			}
+
+			else if (server_slot <= EQ::invbag::GENERAL_BAGS_END && server_slot >= EQ::invbag::GENERAL_BAGS_BEGIN) {
 				TempSlot = server_slot - EQ::invbag::GENERAL_BAGS_BEGIN;
 
 				TOBSlot.Slot = invslot::GENERAL_BEGIN + (TempSlot / EQ::invbag::SLOT_COUNT);
@@ -11776,6 +12375,17 @@ namespace TOB
 
 				else if (tob_slot.SubIndex >= invbag::SLOT_BEGIN && tob_slot.SubIndex <= invbag::SLOT_END) {
 					if (tob_slot.Slot < invslot::GENERAL_BEGIN)
+						return EQ::invslot::SLOT_INVALID;
+
+					// the bag on the cursor: ToB's cursor comes after general 11/12, so the general formula
+					// would land in the server's bank bags
+					if (tob_slot.Slot == invslot::slotCursor) {
+						server_slot = EQ::invbag::CURSOR_BAG_BEGIN + tob_slot.SubIndex;
+						break;
+					}
+
+					// bags in general 11/12 have no server slots
+					if (tob_slot.Slot == invslot::slotGeneral11 || tob_slot.Slot == invslot::slotGeneral12)
 						return EQ::invslot::SLOT_INVALID;
 
 					temp_slot = (tob_slot.Slot - invslot::GENERAL_BEGIN) * invbag::SLOT_COUNT;
@@ -11878,6 +12488,19 @@ namespace TOB
 
 			break;
 		}
+		case invtype::typeEquipmentKeyRingItems: {
+			// like the other rings, -1 asks the server for the first free index
+			if (tob_slot.SubIndex == invbag::SLOT_INVALID) {
+				if (tob_slot.Slot == invslot::SLOT_INVALID) {
+					server_slot = EQ::invslot::EQUIPMENT_KEYRING_APPEND;
+				}
+				else if (tob_slot.Slot >= 0 && tob_slot.Slot < EQ::invslot::EQUIPMENT_KEYRING_SIZE) {
+					server_slot = EQ::invslot::EquipmentKeyRingSlot(tob_slot.Slot);
+				}
+			}
+
+			break;
+		}
 		case invtype::typeCorpse: {
 			if (tob_slot.Slot >= invslot::CORPSE_BEGIN && tob_slot.Slot <= invslot::CORPSE_END) {
 				server_slot = tob_slot.Slot;
@@ -11895,6 +12518,78 @@ namespace TOB
 			tob_slot.Type, tob_slot.Slot, tob_slot.SubIndex, tob_slot.AugIndex, server_slot).c_str());
 
 		return server_slot;
+	}
+
+	// Server slot for a ToB move. ToB has slots the server doesn't: general 11/12, shared bank past the second
+	// slot, and the bags in them. TOBToServerSlot maps them to SLOT_INVALID, which Client::SwapItem treats as
+	// "destroy the cursor item", so they get a different invalid value and the move is rejected instead.
+	static inline uint32 TOBToServerMoveSlot(const structs::InventorySlot_Struct &tob_slot)
+	{
+		constexpr uint32 TOB_REJECT_SLOT = 0xFFFFFFFE;
+
+		const bool extra_general = tob_slot.Type == invtype::typePossessions &&
+			(tob_slot.Slot == invslot::slotGeneral11 || tob_slot.Slot == invslot::slotGeneral12);
+		const bool unmapped_storage = (tob_slot.Type == invtype::typeBank || tob_slot.Type == invtype::typeSharedBank) &&
+			tob_slot.Slot != invslot::SLOT_INVALID && TOBToServerSlot(tob_slot) == static_cast<uint32>(EQ::invslot::SLOT_INVALID);
+
+		// key ring and stat slots that do not map (stat selection, bad index) must not read as "destroy" either
+		const bool unmapped_ring = tob_slot.Type >= invtype::typeMountKeyRingItems &&
+			tob_slot.Type <= invtype::typeViewModEquipmentKeyRingItems &&
+			TOBToServerSlot(tob_slot) == static_cast<uint32>(EQ::invslot::SLOT_INVALID);
+
+		if (extra_general || unmapped_storage || unmapped_ring) {
+			return TOB_REJECT_SLOT;
+		}
+
+		// the Merc tab is only a move target: no other packet may name a merc slot, so TOBToServerSlot leaves it out
+		if (tob_slot.Type == invtype::typeMercenaryItems) {
+			const bool valid = tob_slot.SubIndex == invbag::SLOT_INVALID && tob_slot.AugIndex == invaug::SOCKET_INVALID &&
+				tob_slot.Slot >= invslot::SLOT_BEGIN && tob_slot.Slot < EQ::invslot::MERC_EQUIPMENT_COUNT;
+
+			return valid ? static_cast<uint32>(EQ::invslot::MercEquipmentSlot(tob_slot.Slot)) : TOB_REJECT_SLOT;
+		}
+
+		return TOBToServerSlot(tob_slot);
+	}
+
+	// Server typed slot (as Handle_OP_MoveMultipleItems reads it) for a server slot id; anything outside
+	// possessions, bank and shared bank (and their bags) comes back with Type -1
+	static inline ::InventorySlot_Struct ServerToEmuTypedSlot(uint32 server_slot)
+	{
+		::InventorySlot_Struct typed{};
+		typed.Type     = invtype::TYPE_INVALID;
+		typed.Slot     = invslot::SLOT_INVALID;
+		typed.SubIndex = invbag::SLOT_INVALID;
+		typed.AugIndex = invaug::SOCKET_INVALID;
+
+		if (server_slot > static_cast<uint32>(INT16_MAX)) {
+			return typed;
+		}
+
+		int16 slot      = static_cast<int16>(server_slot);
+		int16 sub_index = invbag::SLOT_INVALID;
+
+		const int16 parent = EQ::InventoryProfile::CalcSlotId(slot);
+		if (parent != INVALID_INDEX) {
+			sub_index = EQ::InventoryProfile::CalcBagIdx(slot);
+			slot      = parent;
+		}
+
+		if (EQ::ValueWithin(slot, EQ::invslot::POSSESSIONS_BEGIN, EQ::invslot::POSSESSIONS_END)) {
+			typed.Type = EQ::invtype::typePossessions;
+			typed.Slot = slot;
+		} else if (EQ::ValueWithin(slot, EQ::invslot::BANK_BEGIN, EQ::invslot::BANK_END)) {
+			typed.Type = EQ::invtype::typeBank;
+			typed.Slot = slot - EQ::invslot::BANK_BEGIN;
+		} else if (EQ::ValueWithin(slot, EQ::invslot::SHARED_BANK_BEGIN, EQ::invslot::SHARED_BANK_END)) {
+			typed.Type = EQ::invtype::typeSharedBank;
+			typed.Slot = slot - EQ::invslot::SHARED_BANK_BEGIN;
+		} else {
+			return typed;
+		}
+
+		typed.SubIndex = sub_index;
+		return typed;
 	}
 
 	static inline uint32 TOBToServerCorpseSlot(structs::InventorySlot_Struct tob_corpse_slot)
@@ -11942,19 +12637,14 @@ namespace TOB
 
 		switch (tob_type) {
 		case invtype::typePossessions: {
-			if (tob_slot.Slot >= invslot::POSSESSIONS_BEGIN && tob_slot.Slot <= invslot::POSSESSIONS_END) {
-				if (tob_slot.SubIndex == invbag::SLOT_INVALID) {
-					ServerSlot = tob_slot.Slot;
-				}
+			// same layout as a typed possessions slot: ToB's cursor is 35 and general 11/12 have no server slot
+			structs::InventorySlot_Struct typed_slot{};
+			typed_slot.Type     = invtype::typePossessions;
+			typed_slot.Slot     = tob_slot.Slot;
+			typed_slot.SubIndex = tob_slot.SubIndex;
+			typed_slot.AugIndex = tob_slot.AugIndex;
 
-				else if (tob_slot.SubIndex >= invbag::SLOT_BEGIN && tob_slot.SubIndex <= invbag::SLOT_END) {
-					if (tob_slot.Slot < invslot::GENERAL_BEGIN)
-						return EQ::invslot::SLOT_INVALID;
-
-					TempSlot = (tob_slot.Slot - invslot::GENERAL_BEGIN) * invbag::SLOT_COUNT;
-					ServerSlot = EQ::invbag::GENERAL_BAGS_BEGIN + TempSlot + tob_slot.SubIndex;
-				}
-			}
+			ServerSlot = TOBToServerSlot(typed_slot);
 
 			break;
 		}

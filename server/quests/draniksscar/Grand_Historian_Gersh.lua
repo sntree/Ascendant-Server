@@ -2,21 +2,21 @@ local inst_cave=1
 
 local expeditions = {
 	{
-		expedition = { name="Dranik's Hollows: Watering Hole", min_players=3, max_players=6 },
+		expedition = { name="Dranik's Hollows: Watering Hole", min_players=1, max_players=6 },
 		instance   = { zone="dranikhollowsa", version=0, duration=eq.seconds("6h") },
 		compass    = { zone="draniksscar", x=-2045.97, y=15.84, z=214.76 },
 		safereturn = { zone="draniksscar", x=-2018.75, y=6.25, z=204.625, h=0 },
 		zonein     = { x=3508.0, y=1585.0, z=8.25, h=0 }
 	},
 	{
-		expedition = { name="Dranik's Hollows: Fire Pit", min_players=3, max_players=6 },
+		expedition = { name="Dranik's Hollows: Fire Pit", min_players=1, max_players=6 },
 		instance   = { zone="dranikhollowsb", version=0, duration=eq.seconds("6h") },
 		compass    = { zone="draniksscar", x=-2080.3, y=393.54, z=149.22 },
 		safereturn = { zone="draniksscar", x=-2057.5, y=398.75, z=146.625, h=0 },
 		zonein     = { x=0, y=-447.0, z=-39.25, h=511.0 }
 	},
 	{
-		expedition = { name="Dranik's Hollows: Murkglider Hive", min_players=3, max_players=6 },
+		expedition = { name="Dranik's Hollows: Murkglider Hive", min_players=1, max_players=6 },
 		instance   = { zone="dranikhollowsc", version=0, duration=eq.seconds("6h") },
 		compass    = { zone="draniksscar", x=-2059.05, y=574.10, z=209.51 },
 		safereturn = { zone="draniksscar", x=-2038.5, y=589.25, z=201.875, h=0 },

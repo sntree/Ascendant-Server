@@ -133,6 +133,7 @@ void WorldDatabase::GetCharSelectInfo(uint32 account_id, EQApplicationPacket **o
 		cse->Level       = e.level;
 		cse->ShroudClass = cse->Class;
 		cse->ShroudRace  = cse->Race;
+		cse->character_id = character_id;
 		cse->Zone        = e.zone_id;
 		cse->Instance    = 0;
 		cse->Gender      = e.gender;

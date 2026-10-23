@@ -917,6 +917,7 @@ EQ::ItemInstance* EQ::ItemInstance::Clone() const
 
 bool EQ::ItemInstance::IsSlotAllowed(int16 slot_id) const {
 	if (!m_item) { return false; }
+	else if (invslot::IsMercEquipmentSlot(slot_id)) { return (m_item->Slots & (1u << invslot::MERC_EQUIPMENT_WORN_SLOTS[invslot::MercEquipmentIndex(slot_id)])) != 0; }
 	else if (InventoryProfile::SupportsContainers(slot_id)) { return true; }
 	else if (m_item->Slots & (1 << slot_id)) { return true; }
 	else if (slot_id > invslot::EQUIPMENT_END) { return true; } // why do we call 'InventoryProfile::SupportsContainers' with this here?
@@ -1975,6 +1976,21 @@ void EQ::ItemInstance::SetSerialBlockAllocator(std::function<bool(int32 &start, 
 bool EQ::ItemInstance::ClaimPersistedSerial(int32 serial)
 {
 	return serial > 0 && claimed_persisted_serials.insert(serial).second;
+}
+
+// a character that leaves and comes back to the same zone process must get its serials again, or the
+// references kept by serial (equipment sets, hoard) no longer match after the reload
+void EQ::ItemInstance::ReleasePersistedSerials(ItemInstance *inst)
+{
+	if (!inst) {
+		return;
+	}
+
+	claimed_persisted_serials.erase(inst->GetSerialNumber());
+
+	for (auto &[index, contents] : *inst->GetContents()) {
+		ReleasePersistedSerials(contents);
+	}
 }
 
 void EQ::ItemInstance::ClearGUIDMap()

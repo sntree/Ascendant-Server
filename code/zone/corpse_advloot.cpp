@@ -251,6 +251,22 @@ void Corpse::StartAdvancedLoot(Client *killer)
 
 	Raid  *raid  = killer->IsRaidGrouped() ? killer->GetRaid() : nullptr;
 	Group *group = !raid && killer->IsGrouped() ? killer->GetGroup() : nullptr;
+
+	// A player grouped only with their merc loots alone: the ToB client knows the merc is not a looter and
+	// shows only Personal Loot for that group, so shared loot would never appear in its window
+	if (group) {
+		int players = 0;
+		for (int i = 0; i < MAX_GROUP_MEMBERS; ++i) {
+			const Mob *m = group->members[i];
+			if (group->membername[i][0] && !(m && (m->IsMerc() || m->IsBot()))) {
+				++players;
+			}
+		}
+
+		if (players <= 1) {
+			group = nullptr;
+		}
+	}
 	if (raid) {
 		// shared loot only when every raid member in the zone can use it and the leader (master looter) is here
 		Client *master_looter = raid->GetAdvancedLootMasterLooter();
@@ -1017,6 +1033,15 @@ void Corpse::AdvancedGiveItem(Client *c, uint32 transaction_id, uint32 item_id, 
 	if (!target || !IsAdvancedLootFor(target)) {
 		c->Message(Chat::Loot, fmt::format("{} cannot receive loot from this corpse.", to_name).c_str());
 		SendAdvLootClearPending(c, GetID(), item_id);
+
+		// the clear alone leaves the Give row busy (out-of-zone target), so send the corpse's rows again
+		SerializeBuffer buf;
+		buf.WriteUInt32(GetID());
+		auto outapp = new EQApplicationPacket(OP_AdvLootRemoveCorpse, std::move(buf));
+		c->QueuePacket(outapp);
+		safe_delete(outapp);
+
+		SendAdvancedLootItems(c);
 		return;
 	}
 

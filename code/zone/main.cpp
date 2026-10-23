@@ -31,6 +31,7 @@
 #include "common/opcodemgr.h"
 #include "common/patches/patches.h"
 #include "common/path_manager.h"
+#include "common/persona.h"
 #include "common/platform/posix/include_pthreads.h"
 #include "common/profanity_manager.h"
 #include "common/rulesys.h"
@@ -333,6 +334,7 @@ int main(int argc, char **argv)
 	MapOpcodes();
 
 	database.LoadVariables();
+	Persona::CheckStorageEngines(database);
 
 	std::string hotfix_name;
 	if (database.GetVariable("hotfix_name", hotfix_name)) {

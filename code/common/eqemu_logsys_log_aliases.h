@@ -932,6 +932,26 @@
         OutF(logsys, Logs::Detail, Logs::Achievements, __FILE__, __func__, __LINE__, message, ##__VA_ARGS__);\
 } while (0)
 
+#define LogFellowships(message, ...) do {\
+    if (auto logsys = EQEmuLogSys::Instance(); logsys && logsys->IsLogEnabled(Logs::General, Logs::Fellowships))\
+        OutF(logsys, Logs::General, Logs::Fellowships, __FILE__, __func__, __LINE__, message, ##__VA_ARGS__);\
+} while (0)
+
+#define LogFellowshipsDetail(message, ...) do {\
+    if (auto logsys = EQEmuLogSys::Instance(); logsys && logsys->IsLogEnabled(Logs::Detail, Logs::Fellowships))\
+        OutF(logsys, Logs::Detail, Logs::Fellowships, __FILE__, __func__, __LINE__, message, ##__VA_ARGS__);\
+} while (0)
+
+#define LogPersonas(message, ...) do {\
+    if (auto logsys = EQEmuLogSys::Instance(); logsys && logsys->IsLogEnabled(Logs::General, Logs::Personas))\
+        OutF(logsys, Logs::General, Logs::Personas, __FILE__, __func__, __LINE__, message, ##__VA_ARGS__);\
+} while (0)
+
+#define LogPersonasDetail(message, ...) do {\
+    if (auto logsys = EQEmuLogSys::Instance(); logsys && logsys->IsLogEnabled(Logs::Detail, Logs::Personas))\
+        OutF(logsys, Logs::Detail, Logs::Personas, __FILE__, __func__, __LINE__, message, ##__VA_ARGS__);\
+} while (0)
+
 #define Log(debug_level, log_category, message, ...) do {\
     if (auto logsys = EQEmuLogSys::Instance(); logsys && logsys->IsLogEnabled(debug_level, log_category))\
         logsys->Out(debug_level, log_category, __FILE__, __func__, __LINE__, message, ##__VA_ARGS__);\

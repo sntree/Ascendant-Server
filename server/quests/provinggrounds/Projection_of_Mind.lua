@@ -6,7 +6,7 @@ local safereturn = { zone="provinggrounds", x=-942.625, y=400.5, z=-307.25, h=0 
 local zonein     = { x=0.0, y=-37.0, z=-0.875, h=0 }
 
 local fear = {
-	expedition = { name="Proving Grounds: The Mastery of Fear", min_players=2, max_players=6 },
+	expedition = { name="Proving Grounds: The Mastery of Fear", min_players=1, max_players=6 },
 	instance   = { zone="chambersa", version=1, duration=eq.seconds("1h") },
 	compass    = compass,
 	safereturn = safereturn,

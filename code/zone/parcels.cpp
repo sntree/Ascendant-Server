@@ -672,8 +672,17 @@ void Client::SendParcelAck()
 	QueuePacket(outapp2.get());
 }
 
-void Client::SendParcelRetrieveAck()
+// TOB+: the reply names the parcel that was retrieved, and the window's Retrieve All only asks for the next parcel
+// once it gets one (eqgame #630 0x14020fa60 reads the parcel slot and item id at offset 8). An empty reply stops it.
+void Client::SendParcelRetrieveAck(const ParcelRetrieve_Struct *retrieved)
 {
+	if (retrieved && ClientVersion() >= EQ::versions::ClientVersion::TOB) {
+		std::unique_ptr<EQApplicationPacket> outapp(new EQApplicationPacket(OP_ShopRetrieveParcel, sizeof(ParcelRetrieve_Struct)));
+		memcpy(outapp->pBuffer, retrieved, sizeof(ParcelRetrieve_Struct));
+		QueuePacket(outapp.get());
+		return;
+	}
+
 	std::unique_ptr<EQApplicationPacket> outapp(new EQApplicationPacket(OP_ShopRetrieveParcel));
 	QueuePacket(outapp.get());
 }
@@ -853,9 +862,11 @@ void Client::DoParcelRetrieve(const ParcelRetrieve_Struct &parcel_in)
 		DeleteParcel(p->second.id);
 		SendParcelDelete(parcel_in);
 		m_parcels.erase(p);
+		SendParcelRetrieveAck(&parcel_in);
+	} else {
+		SendParcelRetrieveAck();
 	}
 
-	SendParcelRetrieveAck();
 	SendParcelIconStatus();
 }
 

@@ -149,6 +149,8 @@ namespace Logs {
 		NetClient,
 		NetTCP,
 		Achievements,
+		Fellowships,
+		Personas,
 		MaxCategoryID /* Don't Remove this */
 	};
 
@@ -260,7 +262,9 @@ namespace Logs {
 		"ZoneState",
 		"Net Server <-> Client",
 		"Net TCP",
-		"Achievements"
+		"Achievements",
+		"Fellowships",
+		"Personas"
 	};
 }
 

@@ -64,6 +64,7 @@ namespace EQ
 #include "common/guilds.h"
 #include "common/inventory_profile.h"
 #include "common/linked_list.h"
+#include "common/persona.h"
 #include "common/ptimer.h"
 #include "common/races.h"
 #include "common/repositories/buyer_buy_lines_repository.h"
@@ -334,6 +335,7 @@ public:
 	bool IsOfClientBot() const override { return true; }
 	bool IsOfClientBotMerc() const override { return true; }
 	void CompleteConnect();
+	bool HasRoomForMerchantItem(const EQ::ItemData* item, int16 charges);
 	bool TryStacking(EQ::ItemInstance* item, uint8 type = ItemPacketTrade, bool try_worn = true, bool try_cursor = true);
 	void SendTraderPacket(Client* trader, uint32 Unknown72 = 51);
 	void SendBuyerPacket(Client* Buyer);
@@ -382,7 +384,7 @@ public:
 	void SendParcel(Parcel_Struct &parcel);
 	void SendParcelStatus();
 	void SendParcelAck();
-	void SendParcelRetrieveAck();
+	void SendParcelRetrieveAck(const ParcelRetrieve_Struct *retrieved = nullptr);
 	void SendParcelDelete(const ParcelRetrieve_Struct &parcel_in);
 	void SendParcelDeliveryToWorld(const Parcel_Struct &parcel);
 	void SetParcelEnabled(bool status) { m_parcel_enabled = status; }
@@ -931,7 +933,8 @@ public:
 	bool IsDiscovered(uint32 itemid);
 	void DiscoverItem(uint32 itemid);
 
-	bool TGB() const { return tgb; }
+	// ToB never sends OP_TGB, so target group buff is always on for it
+	bool TGB() const { return tgb || ClientVersion() >= EQ::versions::ClientVersion::TOB; }
 
 	void OnDisconnect(bool hard_disconnect);
 
@@ -1198,8 +1201,24 @@ public:
 	bool SendMarketplaceModelPreview(uint16 spell_id);
 	void SendMarketplacePurchaseResult(uint32 offer_id, MarketplacePurchaseResult result);
 	void PurchaseMarketplaceOffer(uint32 offer_id, uint32 quantity);
+	// TOB+ personas (rule Character:PersonaSlots): alternate classes of this character, zone/persona.cpp
+	bool IsPersonasEnabled();
+	const Persona::ClassLevels &GetPersonaClasses() const;
+	bool HasPersona(uint8 class_id) const;
+	uint8 GetPersonaLevel(uint8 class_id) const;
+	void LoadPersonaClasses();
+	void SendPersonaClassList();
+	void UpdatePersonaLevel();
+	// bypass_checks skips the switch refusals (GM use); the move itself can still fail
+	bool SwitchPersona(uint8 class_id, bool bypass_checks = false, bool aa_purchasable = false);
+	bool DeletePersona(uint8 class_id);
 	uint32 SummonMarketplaceItems(const EQ::ItemData *item, uint32 quantity);
 	bool OpenMarketplacePackage(int16 inventory_slot);
+	// TOB+ fellowships (rule Character:EnableFellowships); world owns the state, zones keep a copy
+	bool IsFellowshipEnabled() const;
+	inline uint32 GetFellowshipID() const { return m_fellowship_id; }
+	inline void SetFellowshipID(uint32 fellowship_id) { m_fellowship_id = fellowship_id; }
+	void UseFellowshipInsignia();
 	// TOB+ achievements and collections (rule Character:EnableAchievements)
 	bool AreAchievementsEnabled() const;
 	void LoadAchievements();
@@ -1214,6 +1233,10 @@ public:
 	bool ResetAchievement(uint32 achievement_id);
 	uint32 GetAchievementComponentProgress(uint32 achievement_id, uint32 component_id) const;
 	bool UpdateAchievementComponent(uint32 achievement_id, uint32 component_id, uint32 amount);
+	// TOB+ merc equipment tab (rule Mercs:AllowMercEquipment): gear for the active mercenary
+	bool IsMercEquipmentEnabled();
+	uint32 GetMercEquipmentRefusal(int16 merc_slot_id, const EQ::ItemInstance *inst);
+	bool MoveMercEquipmentItem(MoveItem_Struct *move_in);
 	bool IsKeyRingEnabled();
 	int GetKeyRingCapacity(int ring);
 	bool CanAddToKeyRing(int ring, const EQ::ItemInstance *inst);
@@ -1228,6 +1251,17 @@ public:
 	bool AddItemToKeyRing(uint32 item_id);
 	bool RemoveItemFromKeyRing(uint32 item_id);
 	std::vector<uint32> GetKeyRingItemIDs(int ring);
+	// TOB+ Equipment key ring (rule Character:EquipmentKeyRingSlots); needs the client's tab, announced by OP_EquipmentKeyRingOption
+	int GetEquipmentKeyRingCapacity();
+	bool HasEquipmentKeyRing() const { return m_has_equipment_key_ring; }
+	bool IsStoringEquipmentSets();
+	bool CanAddToEquipmentKeyRing(const EQ::ItemInstance *inst);
+	int16 FindFreeEquipmentKeyRingSlot();
+	bool CanStoreInEquipmentKeyRing(const EQ::ItemInstance *inst);
+	int16 StoreInEquipmentKeyRing(const EQ::ItemInstance &inst);
+	bool AddToEquipmentKeyRing();
+	void SendEquipmentKeyRingState();
+	void SendEquipmentKeyRingItems();
 	// quest API: deliver an item to the cursor, or the Item Overflow window when the cursor is taken
 	bool AddItemToOverflow(uint32 item_id, int16 charges = 0);
 	int GetItemOverflowCount();
@@ -1256,7 +1290,7 @@ public:
 
 	void SendItemLink(const EQ::ItemInstance* inst, bool sendtoall=false);
 	void SendLootItemInPacket(const EQ::ItemInstance* inst, int16 slot_id);
-	void SendItemPacket(int16 slot_id, const EQ::ItemInstance* inst, ItemPacketType packet_type);
+	void SendItemPacket(int16 slot_id, const EQ::ItemInstance* inst, ItemPacketType packet_type, bool overflow_message = true);
 	bool IsValidSlot(uint32 slot);
 	bool IsBankSlot(uint32 slot);
 
@@ -1675,7 +1709,7 @@ public:
 	void ClearPendingAdventureDoorClick() { safe_delete(adventure_door_timer); }
 	void ClearPendingAdventureData();
 
-	bool CanEnterZone(const std::string& zone_short_name = "", int16 instance_version = -1);
+	bool CanEnterZone(const std::string& zone_short_name = "", int16 instance_version = -1, uint8 level = 0);
 
 	uint32 GetAggroCount();
 	void IncrementAggroCount(bool raid_target = false);
@@ -1873,6 +1907,11 @@ public:
 	void SetMercID( uint32 newmercid) { mercid = newmercid; }
 	void SetMercSlot( uint8 newmercslot) { mercSlot = newmercslot; }
 	Merc* GetMerc();
+	bool IsMercAutoAssistOn() const { return m_merc_auto_assist; }
+	MercOwnerSettings& GetMercSettings() { return m_merc_settings; }
+	void LoadMercSettings();
+	void SetMercAutoAssist(bool on);
+	bool CallMercAssist();
 	MercInfo& GetMercInfo(uint8 slot) { return m_mercinfo[slot]; }
 	MercInfo& GetMercInfo() { return m_mercinfo[mercSlot]; }
 	uint8 GetNumberOfMercenaries();
@@ -1886,11 +1925,13 @@ public:
 	void SendMercTimerPacket(int32 entity_id, int32 merc_state, int32 suspended_time, int32 update_interval = 900000, int32 unk01 = 180000);
 	void SendMercSuspendResponsePacket(uint32 suspended_time);
 	void SendMercAssignPacket(uint32 entityID, uint32 unk01, uint32 unk02);
+	void SendMercOwnerLinks();
 	void SendMercPersonalInfo();
+	std::vector<int> GetMercDisplayOrder();
 	void SendClearMercInfo();
 	void SuspendMercCommand();
 	void SpawnMercOnZone();
-	void SpawnMerc(Merc* merc, bool setMaxStats);
+	bool SpawnMerc(Merc* merc, bool setMaxStats);
 	void UpdateMercTimer();
 	void UpdateMercLevel();
 	void CheckMercSuspendTimer();
@@ -2187,6 +2228,8 @@ private:
 	bool duel_challenger = false; // the side that sent the pending OP_RequestDuel
 	bool duelaccepted;
 	std::vector<uint32> keyring;
+	bool m_has_equipment_key_ring = false; // the client sent OP_EquipmentKeyRingOption, so it shows the tab
+	bool m_store_equipment_sets   = false; // its "Store Equipment Set items" box
 	bool tellsoff; // GM /toggle
 	bool gm_hide_me;
 	bool LFG;
@@ -2307,6 +2350,29 @@ private:
 	Timer camp_timer;
 	void CompleteCamp();         // leave group/raid, save, mark instalog (camp_timer and ToB fast camp)
 	bool IsFastCampZone() const; // zones where ToB clients may fast camp
+
+	// parts of zone entry that a persona switch repeats
+	void LoadClassState();
+	void LoadClassTimers();
+	void ReapplyLoadedBuffs();
+
+	// TOB+ personas, zone/persona.cpp
+	Persona::ClassLevels m_persona_classes; // owned classes with their levels, filled at zone entry
+	uint32 GetPersonaSwitchRefusal(uint8 class_id, bool aa_purchasable);
+	bool IsPersonaChangeBlockedByCombat();
+	void RefusePersonaRequest(uint32 string_id);
+	bool CancelPersonaTrade(uint32 &with_id);
+	bool CanWearAsPersona(const EQ::ItemData *item, bool check_level = true);
+	void UnequipPersonaGear(bool check_level = true);
+	void SavePersonaEquipmentSet();
+	void LoadPersonaEquipmentSet(bool client_update);
+	int16 FindPersonaItemSlot(uint32 item_serial);
+	void ReloadPersonaState();
+	void SendPersonaExpUpdate();
+	void SendPersonaSwitchStart(bool trade_cancelled, uint32 trade_with_id);
+	void SendPersonaSwapPackets();
+	void SendPersonaObserverUpdate();
+	void UpdatePersonaSocialState();
 	Timer bot_camp_timer;
 	Timer process_timer;
 	Timer consume_food_timer;
@@ -2329,6 +2395,8 @@ private:
 	Timer TrackingTimer;
 	Timer RespawnFromHoverTimer;
 	Timer merc_timer;
+	bool m_merc_auto_assist = true;
+	MercOwnerSettings m_merc_settings;
 	Timer anon_toggle_timer;
 	Timer afk_toggle_timer;
 	Timer helm_toggle_timer;
@@ -2340,6 +2408,8 @@ private:
 	Timer parcel_timer;	//Used to limit the number of parcels to one every 30 seconds (default).  Changable via rule.
 	Timer lazy_load_bank_check_timer;
 	Timer bandolier_throttle_timer;
+	Timer m_fellowship_list_timer; // campfire list rate limit, disabled until the first request
+	uint32 m_fellowship_id{0};
 
 	bool m_lazy_load_bank            = false;
 	int  m_lazy_load_sent_bank_slots = 0;

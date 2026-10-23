@@ -123,6 +123,11 @@ namespace EQ
 		// TOB+ Dragon's Hoard rows, keyed by their DRAGON_HOARD_BEGIN slot
 		inline const std::map<int16, ItemInstance*>& GetDragonHoardItems() const { return m_dragon_hoard; }
 
+		// TOB+ merc equipment tab items, keyed by their MERC_EQUIPMENT_BEGIN slot
+		inline const std::map<int16, ItemInstance*>& GetMercEquipmentItems() const { return m_merc_equipment; }
+		// TOB+ Equipment key ring items, keyed by their EQUIPMENT_KEYRING_BEGIN slot
+		inline const std::map<int16, ItemInstance*>& GetEquipmentKeyRingItems() const { return m_equipment_keyring; }
+
 		// Retrieve a read-only item from inventory
 		inline const ItemInstance* operator[](int16 slot_id) const { return GetItem(slot_id); }
 
@@ -252,6 +257,8 @@ namespace EQ
 		std::map<int16, ItemInstance*>	m_trade;	// Items in a trade session
 		std::map<int16, ItemInstance*>	m_keyring;	// TOB+ key ring items
 		std::map<int16, ItemInstance*>	m_dragon_hoard;	// TOB+ Dragon's Hoard items
+		std::map<int16, ItemInstance*>	m_merc_equipment;	// TOB+ merc equipment tab items
+		std::map<int16, ItemInstance*>	m_equipment_keyring;	// TOB+ Equipment key ring items
 		::ItemInstQueue					m_cursor;	// Items on cursor: FIFO
 
 	private:

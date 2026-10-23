@@ -149,6 +149,33 @@ SharedDatabase::MailKeys SharedDatabase::GetMailKey(uint32 character_id)
 	};
 }
 
+static InventoryRepository::Inventory InventoryRow(uint32 char_id, const EQ::ItemInstance* inst, int16 slot_id)
+{
+	std::vector<uint32> augment_ids = inst->GetAugmentIDs();
+
+	auto e = InventoryRepository::NewEntity();
+
+	e.character_id        = char_id;
+	e.slot_id             = slot_id;
+	e.item_id             = inst->GetID();
+	e.charges             = inst->GetCharges() >= 0 ? inst->GetCharges() : std::numeric_limits<int16>::max();
+	e.color               = inst->GetColor();
+	e.augment_one         = augment_ids[0];
+	e.augment_two         = augment_ids[1];
+	e.augment_three       = augment_ids[2];
+	e.augment_four        = augment_ids[3];
+	e.augment_five        = augment_ids[4];
+	e.augment_six         = augment_ids[5];
+	e.instnodrop          = inst->IsAttuned() ? 1 : 0;
+	e.custom_data         = inst->GetCustomDataString();
+	e.ornament_icon       = inst->GetOrnamentationIcon();
+	e.ornament_idfile     = inst->GetOrnamentationIDFile();
+	e.ornament_hero_model = inst->GetOrnamentHeroModel();
+	e.guid                = inst->GetSerialNumber();
+
+	return e;
+}
+
 bool SharedDatabase::SaveCursor(
 	uint32 char_id,
 	std::list<EQ::ItemInstance*>::const_iterator& start,
@@ -158,29 +185,59 @@ bool SharedDatabase::SaveCursor(
 	const int deleted = InventoryRepository::DeleteWhere(
 		*this,
 		fmt::format(
-			"`character_id` = {} AND (`slot_id` = {} OR `slot_id` BETWEEN {} AND {})",
+			"`character_id` = {} AND (`slot_id` = {} OR `slot_id` BETWEEN {} AND {} OR `slot_id` BETWEEN {} AND {})",
 			char_id,
 			EQ::invslot::slotCursor,
 			EQ::invbag::CURSOR_BAG_BEGIN,
-			EQ::invbag::CURSOR_BAG_END
+			EQ::invbag::CURSOR_BAG_END,
+			EQ::invslot::CURSOR_QUEUE_BEGIN,
+			EQ::invslot::CURSOR_QUEUE_END
 		)
 	);
 
-	int16 i = EQ::invbag::CURSOR_BAG_BEGIN;
-	for (auto& it = start; it != end; ++it, i++) {
-		// shouldn't be anything in the queue that indexes this high
-		if (i > EQ::invbag::CURSOR_BAG_END) {
+	// the cursor item's bag contents are saved at the cursor bag slots, so the rest of the queue has its own range.
+	// One write for the whole queue: it can hold thousands of items.
+	std::vector<InventoryRepository::Inventory> rows;
+	int16 slot_id = EQ::invslot::slotCursor;
+	for (auto& it = start; it != end; ++it) {
+		if (slot_id > EQ::invslot::CURSOR_QUEUE_END) {
+			LogError("Character [{}] cursor queue is longer than [{}] items, the rest is not saved", char_id, EQ::invslot::CURSOR_QUEUE_END - EQ::invslot::CURSOR_QUEUE_BEGIN + 2);
 			break;
 		}
 
 		const EQ::ItemInstance* inst = *it;
-		const int16 use_slot = i == EQ::invbag::CURSOR_BAG_BEGIN ? EQ::invslot::slotCursor : i;
-		if (!SaveInventory(char_id, inst, use_slot)) {
-			return false;
+		if (!inst || !inst->GetItem()) {
+			LogError("Character [{}] cursor queue holds an empty entry, skipped", char_id);
+			continue;
+		}
+
+		rows.push_back(InventoryRow(char_id, inst, slot_id));
+
+		if (inst->IsClassBag() && EQ::InventoryProfile::SupportsContainers(slot_id)) {
+			for (uint8 i = EQ::invbag::SLOT_BEGIN; i < inst->GetItem()->BagSlots && i <= EQ::invbag::SLOT_END; i++) {
+				const EQ::ItemInstance* bag_inst = inst->GetItem(i);
+				if (bag_inst && bag_inst->GetItem()) {
+					rows.push_back(InventoryRow(char_id, bag_inst, EQ::InventoryProfile::CalcSlotId(slot_id, i)));
+				}
+			}
+		}
+
+		slot_id = slot_id == EQ::invslot::slotCursor ? EQ::invslot::CURSOR_QUEUE_BEGIN : slot_id + 1;
+	}
+
+	// in batches, so one failed statement costs at most one batch of rows until the next save
+	constexpr size_t batch_size = 500;
+	bool saved = true;
+	for (size_t begin = 0; begin < rows.size(); begin += batch_size) {
+		const auto first = rows.begin() + begin;
+		const auto last  = rows.begin() + std::min(begin + batch_size, rows.size());
+
+		if (InventoryRepository::ReplaceMany(*this, std::vector<InventoryRepository::Inventory>(first, last)) <= 0) {
+			saved = false;
 		}
 	}
 
-	return true;
+	return saved;
 }
 
 // Saves a hoard row (null clears it) and the cursor together, so an item is never in both or neither.
@@ -299,6 +356,11 @@ bool SharedDatabase::VerifyInventory(uint32 account_id, int16 slot_id, const EQ:
 
 bool SharedDatabase::SaveInventory(uint32 char_id, const EQ::ItemInstance* inst, int16 slot_id)
 {
+	if (slot_id < 0) {
+		LogError("Character [{}] item [{}] not saved: invalid slot [{}]", char_id, inst ? inst->GetID() : 0, slot_id);
+		return false;
+	}
+
 	// Don't save any Tribute slots
 	if (
 		EQ::ValueWithin(slot_id, EQ::invslot::GUILD_TRIBUTE_BEGIN, EQ::invslot::GUILD_TRIBUTE_END) ||
@@ -341,31 +403,7 @@ bool SharedDatabase::UpdateInventorySlot(uint32 char_id, const EQ::ItemInstance*
 		return false;
 	}
 
-	std::vector<uint32> augment_ids = inst->GetAugmentIDs();
-
-	uint16 charges = inst->GetCharges() >= 0 ? inst->GetCharges() : std::numeric_limits<int16>::max();
-
-	auto e = InventoryRepository::NewEntity();
-
-	e.character_id        = char_id;
-	e.slot_id             = slot_id;
-	e.item_id             = inst->GetID();
-	e.charges             = charges;
-	e.color               = inst->GetColor();
-	e.augment_one         = augment_ids[0];
-	e.augment_two         = augment_ids[1];
-	e.augment_three       = augment_ids[2];
-	e.augment_four        = augment_ids[3];
-	e.augment_five        = augment_ids[4];
-	e.augment_six         = augment_ids[5];
-	e.instnodrop          = inst->IsAttuned() ? 1 : 0;
-	e.custom_data         = inst->GetCustomDataString();
-	e.ornament_icon       = inst->GetOrnamentationIcon();
-	e.ornament_idfile     = inst->GetOrnamentationIDFile();
-	e.ornament_hero_model = inst->GetOrnamentHeroModel();
-	e.guid                = inst->GetSerialNumber();
-
-	const int replaced = InventoryRepository::ReplaceOne(*this, e);
+	const int replaced = InventoryRepository::ReplaceOne(*this, InventoryRow(char_id, inst, slot_id));
 
 	// Save bag contents, if slot supports bag contents
 	if (inst->IsClassBag() && EQ::InventoryProfile::SupportsContainers(slot_id)) {
@@ -730,6 +768,7 @@ bool SharedDatabase::GetInventory(Client *c)
 
 	const auto timestamps  = GetItemRecastTimestamps(char_id);
 	auto       cv_conflict = false;
+	auto       cursor_loaded = false; // the cursor item came from its own row, so it owns the cursor bag rows
 	const auto pmask       = inv.GetLookup()->PossessionsBitmask;
 	const auto bank_size   = inv.GetLookup()->InventoryTypeSize.Bank;
 
@@ -897,12 +936,25 @@ bool SharedDatabase::GetInventory(Client *c)
 			}
 		}
 
+		// rows load in slot order, so the cursor item is in place before its bag contents and the queue.
+		// Cursor bag rows the cursor bag couldn't hold are queue items saved by the older format.
 		int16 put_slot_id;
-		// this had  || slot_id == EQ::invslot::slotCursor ??s
 		if (EQ::ValueWithin(slot_id, EQ::invbag::CURSOR_BAG_BEGIN, EQ::invbag::CURSOR_BAG_END)) {
+			const EQ::ItemInstance* cursor_bag = cursor_loaded ? inv.GetItem(EQ::invslot::slotCursor) : nullptr;
+			const uint8 bag_index = EQ::InventoryProfile::CalcBagIdx(slot_id);
+			const bool in_cursor_bag = cursor_bag && cursor_bag->IsClassBag() &&
+				bag_index < cursor_bag->GetItem()->BagSlots &&
+				!cursor_bag->GetItem(bag_index) &&
+				EQ::InventoryProfile::CanItemFitInContainer(inst->GetItem(), cursor_bag->GetItem());
+
+			put_slot_id = in_cursor_bag ? inv.PutItem(slot_id, *inst) : inv.PushCursor(*inst);
+		} else if (EQ::ValueWithin(slot_id, EQ::invslot::CURSOR_QUEUE_BEGIN, EQ::invslot::CURSOR_QUEUE_END)) {
 			put_slot_id = inv.PushCursor(*inst);
 		} else {
 			put_slot_id = inv.PutItem(slot_id, *inst);
+			if (slot_id == EQ::invslot::slotCursor && put_slot_id == EQ::invslot::slotCursor) {
+				cursor_loaded = true;
+			}
 		}
 
 		row.guid = inst->GetSerialNumber();

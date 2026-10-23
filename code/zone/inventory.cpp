@@ -659,8 +659,7 @@ bool Client::SummonItem(uint32 item_id, int16 charges, uint32 aug1, uint32 aug2,
 
 	// put item into inventory
 	if (to_slot == EQ::invslot::slotCursor) {
-		PushItemOnCursor(*inst);
-		SendItemPacket(EQ::invslot::slotCursor, inst, ItemPacketLimbo);
+		PushItemOnCursor(*inst, true);
 	} else {
 		PutItemInInventory(to_slot, *inst, true);
 	}
@@ -1087,7 +1086,7 @@ void Client::DeleteItemInInventory(int16 slot_id, int16 quantity, bool client_up
 	// - cursor queue slots were slipping through and crashing client
 	if(!m_inv[slot_id]) {
 		// Make sure the client deletes anything in this slot to match the server.
-		if(client_update && (IsValidSlot(slot_id) || EQ::invslot::IsKeyRingSlot(slot_id))) {
+		if(client_update && (IsValidSlot(slot_id) || EQ::invslot::IsKeyRingSlot(slot_id) || EQ::invslot::IsMercEquipmentSlot(slot_id) || (HasEquipmentKeyRing() && EQ::invslot::IsEquipmentKeyRingSlot(slot_id)))) {
 			EQApplicationPacket* outapp;
 			outapp = new EQApplicationPacket(OP_DeleteItem, sizeof(DeleteItem_Struct));
 			DeleteItem_Struct* delitem	= (DeleteItem_Struct*)outapp->pBuffer;
@@ -1119,7 +1118,7 @@ void Client::DeleteItemInInventory(int16 slot_id, int16 quantity, bool client_up
 			database.SaveInventory(character_id, inst, slot_id);
 	}
 
-	if(client_update && (IsValidSlot(slot_id) || EQ::invslot::IsKeyRingSlot(slot_id))) {
+	if(client_update && (IsValidSlot(slot_id) || EQ::invslot::IsKeyRingSlot(slot_id) || EQ::invslot::IsMercEquipmentSlot(slot_id) || (HasEquipmentKeyRing() && EQ::invslot::IsEquipmentKeyRingSlot(slot_id)))) {
 		EQApplicationPacket* outapp = nullptr;
 		if(inst) {
 			if (!inst->IsStackable() && !isDeleted) {
@@ -1155,14 +1154,44 @@ void Client::DeleteItemInInventory(int16 slot_id, int16 quantity, bool client_up
 
 bool Client::PushItemOnCursor(const EQ::ItemInstance& inst, bool client_update)
 {
-	LogInventory("Putting item [{}] ([{}]) on the cursor", inst.GetItem()->Name, inst.GetItem()->ID);
+	auto queue_item = [&](const EQ::ItemInstance& item, bool new_item) {
+		LogInventory("Putting item [{}] ([{}]) on the cursor", item.GetItem()->Name, item.GetItem()->ID);
 
-	EvolvingItemsManager::Instance()->DoLootChecks(CharacterID(), EQ::invslot::slotCursor, inst);
-	m_inv.PushCursor(inst);
-	AchievementEvent(Achievement::EventType::OwnItem, inst.GetID(), 1);
+		EvolvingItemsManager::Instance()->DoLootChecks(CharacterID(), EQ::invslot::slotCursor, item);
+		m_inv.PushCursor(item);
+		if (new_item) {
+			AchievementEvent(Achievement::EventType::OwnItem, item.GetID(), 1);
+		}
 
-	if (client_update) {
-		SendItemPacket(EQ::invslot::slotCursor, &inst, ItemPacketLimbo);
+		// a split bag's items are announced once, with the bag
+		if (client_update) {
+			SendItemPacket(EQ::invslot::slotCursor, &item, ItemPacketLimbo, new_item);
+		}
+	};
+
+	// only the cursor item's bag has slots of its own, so a bag queued behind it is saved empty and its items
+	// follow it on the cursor (as loot does)
+	std::unique_ptr<EQ::ItemInstance> bag;
+	std::vector<std::unique_ptr<EQ::ItemInstance>> bag_contents;
+	if (!m_inv.CursorEmpty() && inst.IsClassBag()) {
+		bag.reset(inst.Clone());
+		for (int index = EQ::invbag::SLOT_BEGIN; index <= EQ::invbag::SLOT_END; ++index) {
+			EQ::ItemInstance* bag_item = bag->PopItem(index);
+			if (bag_item) {
+				bag_contents.emplace_back(bag_item);
+			}
+		}
+	}
+
+	if (bag_contents.empty()) {
+		queue_item(inst, true);
+	} else {
+		LogInventory("Bag [{}] queued behind the cursor item, its [{}] items follow it", bag->GetID(), bag_contents.size());
+
+		queue_item(*bag, true);
+		for (const auto& bag_item : bag_contents) {
+			queue_item(*bag_item, false);
+		}
 	}
 
 	auto s = m_inv.cursor_cbegin(), e = m_inv.cursor_cend();
@@ -1178,6 +1207,13 @@ bool Client::PutItemInInventory(int16 slot_id, const EQ::ItemInstance& inst, boo
 
 	if (slot_id == EQ::invslot::slotCursor) { // don't trust macros before conditional statements...
 		return PushItemOnCursor(inst, client_update);
+	}
+
+	// an invalid slot would lose the item; keep it on the cursor instead
+	if (slot_id == INVALID_INDEX || !IsValidSlot(slot_id)) {
+		LogError("[{}] item [{}] ([{}]) put into invalid slot [{}], kept on the cursor", GetCleanName(), inst.GetItem()->Name, inst.GetItem()->ID, slot_id);
+		PushItemOnCursor(inst, client_update);
+		return false;
 	}
 
 	EvolvingItemsManager::Instance()->DoLootChecks(CharacterID(), slot_id, inst);
@@ -1314,6 +1350,47 @@ bool Client::TryStacking(EQ::ItemInstance* item, uint8 type, bool try_worn, bool
 		}
 	}
 	return false;
+}
+
+// true when a merchant purchase of this item and charge count will fit, without changing the inventory:
+// either partial stacks of it can take every charge, or there is a free slot (an empty cursor counts)
+bool Client::HasRoomForMerchantItem(const EQ::ItemData* item, int16 charges)
+{
+	if (!item) {
+		return false;
+	}
+
+	if (item->Stackable && charges > 0) {
+		int32 room = 0;
+		for (int16 i = EQ::invslot::GENERAL_BEGIN; i <= EQ::invslot::GENERAL_END; i++) {
+			if ((((uint64)1 << i) & GetInv().GetLookup()->PossessionsBitmask) == 0) {
+				continue;
+			}
+
+			auto stack = m_inv.GetItem(i);
+			if (stack && stack->GetItem()->ID == item->ID) {
+				room += std::max(0, stack->GetItem()->StackSize - stack->GetCharges());
+			}
+
+			for (uint8 j = EQ::invbag::SLOT_BEGIN; j <= EQ::invbag::SLOT_END; j++) {
+				auto bag_stack = m_inv.GetItem(EQ::InventoryProfile::CalcSlotId(i, j));
+				if (bag_stack && bag_stack->GetItem()->ID == item->ID) {
+					room += std::max(0, bag_stack->GetItem()->StackSize - bag_stack->GetCharges());
+				}
+			}
+		}
+
+		if (room >= charges) {
+			return true;
+		}
+	}
+
+	const int16 free_slot = m_inv.FindFreeSlot(false, true, item->Size);
+	if (free_slot == INVALID_INDEX) {
+		return false;
+	}
+
+	return free_slot != EQ::invslot::slotCursor || !m_inv.GetItem(EQ::invslot::slotCursor);
 }
 
 // Locate an available space in inventory to place an item
@@ -1726,8 +1803,16 @@ bool Client::IsBankSlot(uint32 slot)
 bool Client::SwapItem(MoveItem_Struct* move_in) {
 
 	// TOB+ key rings are not inventory slots
-	if (EQ::invslot::IsKeyRingRange(move_in->from_slot) || EQ::invslot::IsKeyRingRange(move_in->to_slot)) {
+	if (
+		EQ::invslot::IsKeyRingRange(move_in->from_slot) || EQ::invslot::IsKeyRingRange(move_in->to_slot) ||
+		EQ::invslot::IsEquipmentKeyRingRange(move_in->from_slot) || EQ::invslot::IsEquipmentKeyRingRange(move_in->to_slot)
+	) {
 		return MoveKeyRingItem(move_in);
+	}
+
+	// nor is the TOB+ Merc tab
+	if (EQ::invslot::IsMercEquipmentSlot(move_in->from_slot) || EQ::invslot::IsMercEquipmentSlot(move_in->to_slot)) {
+		return MoveMercEquipmentItem(move_in);
 	}
 
 	uint32 src_slot_check = move_in->from_slot;
@@ -1748,6 +1833,19 @@ bool Client::SwapItem(MoveItem_Struct* move_in) {
 			Message(Chat::Red, "Warning: Invalid slot move from slot %u to slot %u with %u charges!", src_slot_check, dst_slot_check, stack_count_check);
 		LogInventory("Invalid slot move from slot [{}] to slot [{}] with [{}] charges!", src_slot_check, dst_slot_check, stack_count_check);
 		return false;
+	}
+
+	// an item at a bag index the bag doesn't have is never shown or saved, so it would be lost
+	const int16 dst_bag_slot = EQ::InventoryProfile::CalcSlotId(static_cast<int16>(dst_slot_check));
+	if (dst_bag_slot != INVALID_INDEX) {
+		const EQ::ItemInstance* dst_bag = m_inv.GetItem(dst_bag_slot);
+		const bool fits_bag = dst_bag && dst_bag->IsClassBag() &&
+			EQ::InventoryProfile::CalcBagIdx(static_cast<int16>(dst_slot_check)) < dst_bag->GetItem()->BagSlots;
+
+		if (!fits_bag) {
+			LogInventory("Invalid slot move from slot [{}] to slot [{}]: no bag slot there", src_slot_check, dst_slot_check);
+			return false;
+		}
 	}
 
 	if (move_in->from_slot == move_in->to_slot) { // Item summon, no further processing needed
@@ -3104,7 +3202,7 @@ uint32 Client::GetEquipmentColor(uint8 material_slot) const
 }
 
 // Send an item packet (including all subitems of the item)
-void Client::SendItemPacket(int16 slot_id, const EQ::ItemInstance* inst, ItemPacketType packet_type)
+void Client::SendItemPacket(int16 slot_id, const EQ::ItemInstance* inst, ItemPacketType packet_type, bool overflow_message)
 {
 	if (!inst) {
 		return;
@@ -3129,7 +3227,7 @@ void Client::SendItemPacket(int16 slot_id, const EQ::ItemInstance* inst, ItemPac
 			);
 
 			SendItemPacket(EQ::invslot::OVERFLOW_BEGIN + position, inst, ItemPacketOverflow);
-			if (inst->GetItem()) {
+			if (overflow_message && inst->GetItem()) {
 				MessageString(Chat::Yellow, ITEM_OVERFLOW_ADDED, inst->GetItem()->Name);
 			}
 			return;
@@ -3626,7 +3724,7 @@ bool Client::InterrogateInventory(Client* requester, bool log, bool silent, bool
 		if (cursor_itr == m_inv.cursor_cbegin())
 			continue;
 
-		instmap[EQ::invbag::CURSOR_BAG_BEGIN + limbo] = *cursor_itr;
+		instmap[EQ::invslot::CURSOR_QUEUE_BEGIN + limbo - 1] = *cursor_itr;
 	}
 
 	// call InterrogateInventory_ for error check
@@ -3733,7 +3831,7 @@ bool Client::InterrogateInventory_error(int16 head, int16 index, const EQ::ItemI
 		EQ::ValueWithin(head, EQ::invslot::TRIBUTE_BEGIN, EQ::invslot::TRIBUTE_END) ||
 		EQ::ValueWithin(head, EQ::invslot::GUILD_TRIBUTE_BEGIN, EQ::invslot::GUILD_TRIBUTE_END) ||
 		EQ::ValueWithin(head, EQ::invslot::WORLD_BEGIN, EQ::invslot::WORLD_END) ||
-		EQ::ValueWithin(head, EQ::invbag::CURSOR_BAG_BEGIN, EQ::invbag::CURSOR_BAG_END)
+		EQ::ValueWithin(head, EQ::invslot::CURSOR_QUEUE_BEGIN, EQ::invslot::CURSOR_QUEUE_END)
 	) {
 		switch (depth)
 		{

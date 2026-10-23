@@ -6,7 +6,7 @@ local safereturn = { zone="provinggrounds", x=-1577.75, y=-5561.125, z=-307.75, 
 local zonein     = { x=0.0, y=-37.0, z=-0.875, h=0 }
 
 local subversion = {
-	expedition = { name="Proving Grounds: The Mastery of Subversion", min_players=2, max_players=6 },
+	expedition = { name="Proving Grounds: The Mastery of Subversion", min_players=1, max_players=6 },
 	instance   = { zone="chambersc", version=1, duration=eq.seconds("1h") },
 	compass    = compass,
 	safereturn = safereturn,

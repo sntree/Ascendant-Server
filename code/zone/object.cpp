@@ -678,15 +678,20 @@ bool Object::HandleClick(Client* sender, const ClickObject_Struct* click_object)
 				}
 			}
 
-			// Transfer item to client
-			sender->PutItemInInventory(EQ::invslot::slotCursor, *m_inst, false);
-			sender->SendItemPacket(EQ::invslot::slotCursor, m_inst, ItemPacketTrade);
+			// Transfer item to client. Behind another cursor item it is only queued, so a duplicate lore item is not
+			// given at all (deleting the cursor slot would delete the item in front of it)
+			if (sender->GetInv().CursorEmpty()) {
+				sender->PutItemInInventory(EQ::invslot::slotCursor, *m_inst, false);
+				sender->SendItemPacket(EQ::invslot::slotCursor, m_inst, ItemPacketTrade);
+
+				if (cursor_delete) {    // delete the item if it's a duplicate lore. We have to do this because the client expects the item packet
+					sender->DeleteItemInInventory(EQ::invslot::slotCursor, 1, true);
+				}
+			} else if (!cursor_delete) {
+				sender->PutItemInInventory(EQ::invslot::slotCursor, *m_inst, true);
+			}
 
 			sender->CheckItemDiscoverability(m_inst->GetID());
-
-			if (cursor_delete) {    // delete the item if it's a duplicate lore. We have to do this because the client expects the item packet
-				sender->DeleteItemInInventory(EQ::invslot::slotCursor, 1, true);
-			}
 
 			if (!m_ground_spawn) {
 				safe_delete(m_inst);
